@@ -276,6 +276,7 @@
     let recognitionActive = false;
     let responseGeneration = 0;
     let currentUtterance = null;
+    let currentAudio = null;
 
     // 音声認識の準備
     if ('webkitSpeechRecognition' in window || 'SpeechRecognition' in window) {
@@ -378,6 +379,11 @@
           window.speechSynthesis.cancel();
         }
         currentUtterance = null;
+        if (currentAudio) {
+          currentAudio.pause();
+          currentAudio.currentTime = 0;
+          currentAudio = null;
+        }
 
         currentState = 'idle';
         setButtonState('idle');
@@ -578,32 +584,83 @@ ${userText}
     }
 
     function speakChappyVoice(text, callback) {
+      const speechGeneration = responseGeneration;
+      const speechText = removeEmojis(text).trim();
+
+      // 直前の音声があれば停止してから、新しい音声を準備する
+      if (currentAudio) {
+        currentAudio.pause();
+        currentAudio.currentTime = 0;
+        currentAudio = null;
+      }
       if ('speechSynthesis' in window) {
         window.speechSynthesis.cancel();
-        currentUtterance = null;
-
-        const speechText = removeEmojis(text);
-        const utterance = new SpeechSynthesisUtterance(speechText);
-        const speechGeneration = responseGeneration;
-
-        utterance.lang = 'ja-JP';
-        utterance.rate = 1.0;
-        utterance.pitch = 1.3;
-
-        const finishSpeech = () => {
-          // 中断・差し替え後に古い音声イベントで状態を戻さない
-          if (currentUtterance !== utterance) return;
-          currentUtterance = null;
-          if (speechGeneration === responseGeneration && callback) callback();
-        };
-
-        utterance.onend = finishSpeech;
-        utterance.onerror = finishSpeech;
-        currentUtterance = utterance;
-        window.speechSynthesis.speak(utterance);
-      } else {
-        if (callback) callback();
       }
+      currentUtterance = null;
+
+      let callbackCalled = false;
+      const finishSpeech = () => {
+        if (callbackCalled) return;
+        if (speechGeneration !== responseGeneration) return;
+        callbackCalled = true;
+        if (callback) callback();
+      };
+
+      if (!speechText) {
+        finishSpeech();
+        return;
+      }
+
+      fetch('https://chappy-voicevox-test.nanami-moca.workers.dev/speak', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ text: speechText })
+      })
+        .then(async (response) => {
+          if (speechGeneration !== responseGeneration) return null;
+          if (!response.ok) {
+            throw new Error(`VOICEVOX通信エラー: HTTP ${response.status}`);
+          }
+          return await response.json();
+        })
+        .then((data) => {
+          if (speechGeneration !== responseGeneration || !data) return;
+          if (!data.success || !data.audioUrl) {
+            throw new Error(data?.error || '音声URLを取得できませんでした');
+          }
+
+          const audio = new Audio(data.audioUrl);
+          audio.preload = 'auto';
+          currentAudio = audio;
+
+          const finishThisAudio = () => {
+            if (currentAudio !== audio) return;
+            currentAudio = null;
+            finishSpeech();
+          };
+          audio.onended = finishThisAudio;
+          audio.onerror = () => {
+            console.error('VOICEVOX音声の再生に失敗しました');
+            finishThisAudio();
+          };
+
+          const playResult = audio.play();
+          if (playResult && typeof playResult.catch === 'function') {
+            playResult.catch((error) => {
+              console.error('VOICEVOX音声を再生できませんでした:', error);
+              finishThisAudio();
+            });
+          }
+        })
+        .catch((error) => {
+          if (speechGeneration !== responseGeneration) return;
+          console.error('VOICEVOX音声エラー:', error);
+          if (currentAudio) {
+            currentAudio.pause();
+            currentAudio = null;
+          }
+          finishSpeech();
+        });
     }
 
     function setButtonState(state) {
