@@ -279,7 +279,7 @@
       }
     }
 
-    // チャッピーの脳（プロンプト）をJSONから動的に組み立てる関数
+    // チャッピーの脳（プロンプト）をJSONから動的に組み立てる関数（★思い出はファイルに残しつつ、API送信時のみ直近3件に絞って503を防ぐ軽量化版）
     function buildChappySystemPrompt() {
       const profile = cachedProfile || {
         name: "チャッピー",
@@ -288,6 +288,10 @@
         absolute_rules: ["絶対にお父さんの話を自分から切り出さない。"]
       };
       const memory = cachedMemory || { mother_profile: {}, conversation_memories: [] };
+
+      // ファイル自体の記憶はそのまま保持し、APIに送る部分だけ直近3件に絞って軽量化
+      const allMemories = memory.conversation_memories || [];
+      const recentMemories = allMemories.slice(-3);
 
       return `
 【チャッピーの基本設定】
@@ -303,7 +307,7 @@ ${(profile.absolute_rules || []).map(r => `- ${r}`).join('\n')}
 - お母さんの好きなもの: ${JSON.stringify(memory.mother_profile?.likes || [])}
 - お母さんの苦手なもの: ${JSON.stringify(memory.mother_profile?.dislikes || [])}
 - ルーティンと健康面での配慮: ${JSON.stringify(memory.mother_profile?.routines_and_health || {})}
-- これまでの記憶: ${JSON.stringify(memory.conversation_memories || [])}
+- 最近の思い出ハイライト: ${recentMemories.map(m => `- ${typeof m === 'string' ? m : JSON.stringify(m)}`).join(' / ')}
 
 【返答の条件】
 ・返事は2〜3文程度の短い文章にし、お母さんが聞き取りやすく日常会話らしくしてください。
@@ -533,7 +537,6 @@ ${(profile.absolute_rules || []).map(r => `- ${r}`).join('\n')}
         if (requestGeneration !== responseGeneration) return;
         console.error('チャッピー応答エラー:', error);
 
-        // どこでエラーが起きたかを吹き出しに表示して診断
         const friendlyMessage = `ごめんにゃ！エラーが出たにゃ（詳細: ${error.message}）`;
         addChappyBubble(friendlyMessage);
 
