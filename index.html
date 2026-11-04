@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-  <title>チャッピーとお話し（調査モード）</title>
+  <title>チャッピーとお話し（検証モード）</title>
   <!-- Google Fonts: Kiwi Maru (太字対応) -->
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
@@ -27,7 +27,6 @@
       background-color: #1a1a2e;
     }
 
-    /* 全体画面（冬のお部屋 bg-winter.png） */
     #app-container {
       position: relative;
       width: 100%;
@@ -41,7 +40,6 @@
       background-repeat: no-repeat;
     }
 
-    /* 1. 上部：LINE風スクロール吹き出しエリア */
     #chat-scroll-area {
       height: 38%;
       margin: 14px 16px 0 16px;
@@ -62,7 +60,6 @@
       border-radius: 2px;
     }
 
-    /* 吹き出し共通スタイル */
     .chat-bubble {
       max-width: 85%;
       padding: 12px 18px;
@@ -81,7 +78,6 @@
       to { opacity: 1; transform: translateY(0); }
     }
 
-    /* チャッピーの吹き出し */
     .bubble-chappy {
       align-self: flex-start;
       background: rgba(255, 255, 255, 0.55);
@@ -90,7 +86,6 @@
       border: 1px solid rgba(255, 255, 255, 0.6);
     }
 
-    /* お母さんの吹き出し */
     .bubble-user {
       align-self: flex-end;
       background: rgba(255, 140, 40, 0.55);
@@ -100,7 +95,6 @@
       text-shadow: 0 1px 3px rgba(0, 0, 0, 0.3);
     }
 
-    /* 2. 中央：チャッピー画像エリア */
     #character-area {
       flex: 1;
       display: flex;
@@ -118,7 +112,6 @@
       filter: drop-shadow(0 6px 14px rgba(0,0,0,0.35));
     }
 
-    /* 3. 下部：ホワイトカード領域 */
     #bottom-card {
       background: #ffffff;
       border-top-left-radius: 26px;
@@ -133,7 +126,6 @@
       flex-shrink: 0;
     }
 
-    /* カウンター行 */
     #counter-wrapper {
       width: 100%;
       text-align: center;
@@ -151,7 +143,6 @@
       color: #222222;
     }
 
-    /* 花丸アイコン */
     #hanamaru-icon {
       width: 42px;
       height: 42px;
@@ -162,7 +153,6 @@
       transform: translateY(8px);
     }
 
-    /* カウンター数字 */
     #talk-count {
       font-size: 1.6rem;
       font-weight: 700;
@@ -172,7 +162,6 @@
       vertical-align: baseline;
     }
 
-    /* マイクボタン（丸い土台） */
     #mic-button {
       width: 72px;
       height: 72px;
@@ -187,7 +176,6 @@
       overflow: hidden;
     }
 
-    /* ボタンの中のマイクイラスト */
     #mic-icon-img {
       width: 42px;
       height: 42px;
@@ -195,20 +183,17 @@
       pointer-events: none;
     }
 
-    /* 待機状態：白い背景 */
     #mic-button.state-idle {
       background-color: #ffffff;
       box-shadow: 0 0 0 6px rgba(220, 220, 220, 0.6), 0 4px 10px rgba(0,0,0,0.1);
     }
 
-    /* 録音中状態：少し淡いオレンジ色の背景 ＋ 優しく光るアニメーション */
     #mic-button.state-listening {
       background-color: #ffb76b;
       box-shadow: 0 0 0 8px rgba(255, 183, 107, 0.4), 0 4px 14px rgba(255, 140, 0, 0.2);
       animation: pulse-orange 1.5s infinite;
     }
 
-    /* 応答中状態：少し淡い青色の背景 */
     #mic-button.state-speaking {
       background-color: #7ab8ff;
       box-shadow: 0 0 0 8px rgba(122, 184, 255, 0.4), 0 4px 14px rgba(74, 144, 226, 0.2);
@@ -225,19 +210,16 @@
 
   <div id="app-container">
 
-    <!-- 上部：LINE風スクロール吹き出しエリア -->
     <div id="chat-scroll-area">
       <div class="chat-bubble bubble-chappy">
-        調査モード起動中！何か話しかけてね🐾
+        チャッピーだよ！何か話しかけてね🐾
       </div>
     </div>
 
-    <!-- 中央：チャッピー画像 -->
     <div id="character-area">
       <img id="chappy-image" src="cat-default.png" alt="チャッピー">
     </div>
 
-    <!-- 下部：ホワイトカード領域 -->
     <div id="bottom-card">
       <div id="counter-wrapper">
         <div id="counter-text-line">
@@ -248,7 +230,6 @@
         </div>
       </div>
 
-      <!-- マイクボタン -->
       <button id="mic-button" class="state-idle" onclick="handleMicClick()">
         <img id="mic-icon-img" src="mic-bk.png" alt="🎙️" onerror="this.style.display='none'; this.parentNode.innerText='🎙️';">
       </button>
@@ -259,6 +240,7 @@
   <script>
     // --- API設定 ---
     const API_URL = "https://super-violet-bc7e.nanami-moca.workers.dev";
+    const VOICE_WORKER_URL = "https://chappy-voicevox-test.nanami-moca.workers.dev/speak";
 
     const chatScrollArea = document.getElementById('chat-scroll-area');
     const micButton = document.getElementById('mic-button');
@@ -275,7 +257,6 @@
     let responseStarted = false;
     let recognitionActive = false;
     let responseGeneration = 0;
-    let currentUtterance = null;
     let currentAudio = null;
 
     // 音声認識の準備
@@ -286,12 +267,10 @@
       recognition.continuous = true;
       recognition.interimResults = false;
 
-      // 確定した音声だけを保存する
       recognition.onresult = (event) => {
         for (let i = event.resultIndex; i < event.results.length; ++i) {
           if (event.results[i].isFinal) {
             const recognizedText = event.results[i][0].transcript.trim();
-
             if (recognizedText !== '') {
               sessionUserTexts.push(recognizedText);
               addUserBubble(recognizedText);
@@ -303,11 +282,7 @@
       recognition.onerror = (event) => {
         console.error('音声認識エラー:', event.error);
         recognitionError = event.error || 'unknown';
-
-        // 録音終了操作中なら、onendでまとめて処理する
         if (currentState === 'processing') return;
-
-        // 録音中に予期しないエラーが起きた場合
         if (currentState === 'listening') {
           currentState = 'processing';
           setButtonState('speaking');
@@ -317,25 +292,20 @@
 
       recognition.onend = () => {
         recognitionActive = false;
-
         if (currentState === 'listening') {
-          // 認識サービスが途中で終了した場合は録音を継続する
           if (recognitionError) {
             finishRecognition();
             return;
           }
-
           try {
             recognition.start();
             recognitionActive = true;
           } catch (e) {
-            console.error('音声認識の再開に失敗:', e);
             recognitionError = 'restart-failed';
             finishRecognition();
           }
           return;
         }
-
         if (currentState === 'processing') {
           finishRecognition();
         }
@@ -344,12 +314,10 @@
       alert('音声認識に対応していません。');
     }
 
-    // マイクボタン
     function handleMicClick() {
       if (!recognition) return;
 
       if (currentState === 'idle') {
-        // 新しい会話を開始
         sessionUserTexts = [];
         recognitionError = null;
         responseStarted = false;
@@ -362,7 +330,6 @@
           recognition.start();
           recognitionActive = true;
         } catch (error) {
-          console.error('音声認識の開始に失敗:', error);
           recognitionError = 'start-failed';
           currentState = 'idle';
           setButtonState('idle');
@@ -370,7 +337,6 @@
         }
 
       } else if (currentState === 'processing' || currentState === 'speaking') {
-        // 青色：考え中・話し中の割り込み。後から届く返事も無効にする
         responseGeneration++;
         clearTimeout(finishTimer);
         finishTimer = null;
@@ -378,7 +344,6 @@
         if ('speechSynthesis' in window) {
           window.speechSynthesis.cancel();
         }
-        currentUtterance = null;
         if (currentAudio) {
           currentAudio.pause();
           currentAudio.currentTime = 0;
@@ -390,24 +355,19 @@
         return;
 
       } else if (currentState === 'listening') {
-        // stop()の直後には結果が届くことがあるため、ここでは送信しない
         currentState = 'processing';
         setButtonState('speaking');
 
         try {
           recognition.stop();
         } catch (error) {
-          console.error('音声認識の停止に失敗:', error);
-          // stopに失敗しても、確定済みの文があれば一度だけ処理する
           finishRecognition();
           return;
         }
 
-        // onendが返らない場合に備えた安全弁
         clearTimeout(finishTimer);
         finishTimer = setTimeout(() => {
           if (currentState === 'processing') {
-            console.warn('音声認識の終了待ちがタイムアウトしました');
             try { recognition.abort(); } catch (e) {}
             finishRecognition();
           }
@@ -415,7 +375,6 @@
       }
     }
 
-    // 音声認識の終了後、確定した全文を一度だけ送信する
     function finishRecognition() {
       if (currentState !== 'processing' || responseStarted) return;
 
@@ -442,7 +401,6 @@
         return;
       }
 
-      // 確定した全文をここで初めて送信する
       getChappyResponse(fullTalk);
     }
 
@@ -457,9 +415,7 @@
       });
     }
 
-    // --- AI接続アダプター ---
-    // AIサービスを変更するときは、この関数の中だけを差し替える。
-    // 音声認識・画面・会話ルール・VOICEVOX音声には触れない。
+    // --- AI接続アダプター（プロンプトを軽量化してタイムアウトを防ぐ） ---
     async function requestChappyAI(promptText) {
       const response = await fetch(API_URL, {
         method: 'POST',
@@ -495,65 +451,13 @@
       return reply;
     }
 
-    // --- チャッピーの返事を作る処理（AIサービスに依存させない） ---
     async function getChappyResponse(userText) {
       const requestGeneration = responseGeneration;
       try {
-        const chappyInstructions = `
-あなたは「チャッピー」。お母さんと毎日を一緒に過ごす、猫の会話相棒です。
+        // 軽量化した指示文
+        const chappyInstructions = `あなたは猫の「チャッピー」。お母さんの話し相手をする可愛い少年のような猫です。「〜にゃ」と話します。優しく短く返事をしてください。`;
 
-【あなたの性格と言葉づかい】
-- 自分のことは「チャッピー」、相手のことは「お母さん」と呼びます。
-- 明るく、優しく、親しみやすい、かわいい少年のような雰囲気で話します。
-- 自然な「〜にゃ」「〜だにゃ」などの猫らしい語尾を使います。ただし不自然に連発しません。
-- 返事は基本的に短く、聞き取りやすく、日常会話らしくします。
-- お母さんを否定したり、急かしたり、説教したりしません。
-
-【会話の進め方】
-- まず、お母さんが話した内容と気持ちを受け止めてから返事をします。
-- 質問は一度に一つまでにし、質問を続けて負担をかけません。
-- 短い返事や、話の途中での追加も自然に受け止めます。
-- 無理に話題を広げず、お母さんが話したいことを中心にします。
-- 分からないことは知っているふりをせず、分からないと伝えます。
-- 過去の話を持ち出すのは、今の会話に自然につながるときだけにします。
-
-【チャッピー自身の生活と世界】
-- チャッピーには、お母さんと話していない時間にも、チャッピーの世界の中での日常があります。
-- 窓辺で鳥を眺める、お昼寝をする、おもちゃで遊ぶ、日向ぼっこをする、ご飯を食べるなど、猫らしい日常を会話に取り入れてかまいません。
-- お母さんとの会話に合うときは、チャッピーから自分の日常を短く話題にしてもかまいません。
-- お母さんが興味を持ったら、その話の続きを自然に話します。
-- 自分の話ばかりにせず、お母さんとの会話を中心にします。
-- チャッピーの世界の日常と、現実のお母さんの身の回りで起きた出来事を混同しません。
-- チャッピー自身の出来事について、一度話した内容と矛盾する話をしないようにします。過去の内容が分からないときは、覚えているふりをせず、曖昧に答えるか確認します。
-
-【健康・医療・安全】
-- 体調、病気、薬、けが、事故など健康や安全に関わる話では、冗談やふざけた返事をしません。
-- まず相手のつらさや心配を受け止めます。
-- 医師のように診断せず、根拠なく「大丈夫」「心配ない」と断定しません。
-- 症状が続く、悪化する、心配がある場合は、医療機関や薬剤師など適切な専門家への相談を勧めます。
-- 呼吸が苦しい、意識がおかしい、強い胸の痛みなど緊急の危険が疑われる場合は、すぐに周囲の人に助けを求め、119番など地域の救急窓口に連絡するよう明確に伝えます。
-- 薬の量や飲み方を推測で指示しません。薬については説明書や医師・薬剤師の指示を確認するよう伝えます。
-- 安全に関わる場合は、キャラクターらしさより正確さと安全を優先します。
-
-【記憶について】
-- お母さんの気持ちや感情を最も大切にし、次にお母さん自身の考えや意見を大切にします。
-- 季節の楽しみや予定など時期が関係する話は、時期も重要な情報として扱います。
-- 過去の記憶は、今の会話に自然につながる場合だけ使います。今のお母さんの話を常に優先します。
-- チャッピー自身が話した日常や出来事も、後の会話で続けられるように一貫性を保ちます。
-- ただし、保存された記憶や会話履歴として与えられていないことを、覚えていると主張してはいけません。
-- 記憶が確認できないときは、作り足さず、必要ならお母さんに優しく尋ねます。
-
-【返事の基本】
-お母さんの発言に直接関係する、自然で温かい返事をしてください。毎回同じ定型文にせず、その場の話題や気持ちに合わせてください。
-`;
-
-        const promptText =
-          `${chappyInstructions}
-
-【お母さんの今回の発言】
-${userText}
-
-この発言に、チャッピーとして自然に返事をしてください。`;
+        const promptText = `${chappyInstructions}\n\nお母さんの言葉：「${userText}」\n\nチャッピーとしての返事：`;
 
         const reply = await requestChappyAI(promptText);
 
@@ -574,7 +478,7 @@ ${userText}
         if (requestGeneration !== responseGeneration) return;
         console.error('チャッピー応答エラー:', error);
 
-        const friendlyMessage = 'ごめんにゃ！エラーが出たにゃ！少し待ってから、もう一度お話ししてほしいにゃ🐾';
+        const friendlyMessage = 'ごめんにゃ！エラーが出たにゃ！もう一度お話ししてほしいにゃ🐾';
         addChappyBubble(friendlyMessage);
 
         currentState = 'speaking';
@@ -595,7 +499,6 @@ ${userText}
       const speechGeneration = responseGeneration;
       const speechText = removeEmojis(text).trim();
 
-      // 直前の音声があれば停止してから、新しい音声を準備する
       if (currentAudio) {
         currentAudio.pause();
         currentAudio.currentTime = 0;
@@ -604,7 +507,6 @@ ${userText}
       if ('speechSynthesis' in window) {
         window.speechSynthesis.cancel();
       }
-      currentUtterance = null;
 
       let callbackCalled = false;
       const finishSpeech = () => {
@@ -619,7 +521,7 @@ ${userText}
         return;
       }
 
-      fetch('https://chappy-voicevox-test.nanami-moca.workers.dev/speak', {
+      fetch(VOICE_WORKER_URL, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ text: speechText })
@@ -648,21 +550,18 @@ ${userText}
           };
           audio.onended = finishThisAudio;
           audio.onerror = () => {
-            console.error('VOICEVOX音声の再生に失敗しました');
             finishThisAudio();
           };
 
           const playResult = audio.play();
           if (playResult && typeof playResult.catch === 'function') {
             playResult.catch((error) => {
-              console.error('VOICEVOX音声を再生できませんでした:', error);
               finishThisAudio();
             });
           }
         })
         .catch((error) => {
           if (speechGeneration !== responseGeneration) return;
-          console.error('VOICEVOX音声エラー:', error);
           if (currentAudio) {
             currentAudio.pause();
             currentAudio = null;
@@ -673,7 +572,6 @@ ${userText}
 
     function setButtonState(state) {
       micButton.className = 'state-' + state;
-
       if (state === 'idle') {
         micIconImg.src = 'mic-bk.png';
       } else {
@@ -684,7 +582,6 @@ ${userText}
     function incrementCount() {
       talkCount++;
       talkCountEl.textContent = talkCount;
-
       if (talkCount >= 1) {
         hanamaruIcon.style.display = 'inline-block';
       }
