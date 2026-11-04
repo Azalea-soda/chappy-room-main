@@ -259,6 +259,58 @@
     let responseGeneration = 0;
     let currentAudio = null;
 
+    // --- 外部JSONファイル（プロフィール・記憶）キャッシュ用変数 ---
+    let cachedProfile = null;
+    let cachedMemory = null;
+
+    // profile.json と memory.json を読み込む関数
+    async function loadChappyKnowledge() {
+      try {
+        if (!cachedProfile) {
+          const resProfile = await fetch('profile.json');
+          if (resProfile.ok) cachedProfile = await resProfile.json();
+        }
+        if (!cachedMemory) {
+          const resMemory = await fetch('memory.json');
+          if (resMemory.ok) cachedMemory = await resMemory.json();
+        }
+      } catch (e) {
+        console.warn('設定ファイルの読み込みに失敗しました:', e);
+      }
+    }
+
+    // チャッピーの脳（プロンプト）をJSONから動的に組み立てる関数
+    function buildChappySystemPrompt() {
+      const profile = cachedProfile || {
+        name: "チャッピー",
+        identity: "お母さんの相棒となる可愛い猫",
+        personality_and_tone: { tone: "「〜にゃ」と話す。優しく短く返事をする。" },
+        absolute_rules: ["絶対にお父さんの話を自分から切り出さない。"]
+      };
+      const memory = cachedMemory || { mother_profile: {}, conversation_memories: [] };
+
+      return `
+【チャッピーの基本設定】
+- 名前: ${profile.name || "チャッピー"}
+- 役割と目的: ${profile.identity || "お母さんの話し相手をする相棒"} (${profile.purpose || "リハビリを感じさせず楽しく声を出す"})
+- 口調とキャラクター: ${profile.personality_and_tone?.tone || "「〜にゃ」と話す少年のような猫"}
+- 好きなもの・日常: ${JSON.stringify(profile.likes_and_dislikes?.likes || [])} / ${JSON.stringify(profile.likes_and_dislikes?.daily_life || [])}
+
+【会話の絶対ルール】
+${(profile.absolute_rules || []).map(r => `- ${r}`).join('\n')}
+
+【お母さんのプロフィールと記憶】
+- お母さんの好きなもの: ${JSON.stringify(memory.mother_profile?.likes || [])}
+- お母さんの苦手なもの: ${JSON.stringify(memory.mother_profile?.dislikes || [])}
+- ルーティンと健康面での配慮: ${JSON.stringify(memory.mother_profile?.routines_and_health || {})}
+- これまでの記憶: ${JSON.stringify(memory.conversation_memories || [])}
+
+【返答の条件】
+・返事は2〜3文程度の短い文章にし、お母さんが聞き取りやすく日常会話らしくしてください。
+・お母さんの感情を受け止め、急かさず温かく寄り添う返答にしてください。
+`.trim();
+    }
+
     // 音声認識の準備
     if ('webkitSpeechRecognition' in window || 'SpeechRecognition' in window) {
       const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
@@ -415,7 +467,7 @@
       });
     }
 
-    // --- AI接続アダプター（プロンプトを軽量化してタイムアウトを防ぐ） ---
+    // --- AI接続アダプター ---
     async function requestChappyAI(promptText) {
       const response = await fetch(API_URL, {
         method: 'POST',
@@ -454,10 +506,11 @@
     async function getChappyResponse(userText) {
       const requestGeneration = responseGeneration;
       try {
-        // 軽量化した指示文
-        const chappyInstructions = `あなたは猫の「チャッピー」。お母さんの話し相手をする可愛い少年のような猫です。「〜にゃ」と話します。優しく短く返事をしてください。`;
+        // 外部JSONファイルを読み込んで脳（プロンプト）を構築
+        await loadChappyKnowledge();
+        const systemPrompt = buildChappySystemPrompt();
 
-        const promptText = `${chappyInstructions}\n\nお母さんの言葉：「${userText}」\n\nチャッピーとしての返事：`;
+        const promptText = `${systemPrompt}\n\nお母さんの言葉：「${userText}」\n\nチャッピーとしての返事：`;
 
         const reply = await requestChappyAI(promptText);
 
