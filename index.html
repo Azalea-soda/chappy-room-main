@@ -457,7 +457,45 @@
       });
     }
 
-    // --- Geminiへの通常JSONリクエスト ---
+    // --- AI接続アダプター ---
+    // AIサービスを変更するときは、この関数の中だけを差し替える。
+    // 音声認識・画面・会話ルール・VOICEVOX音声には触れない。
+    async function requestChappyAI(promptText) {
+      const response = await fetch(API_URL, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json; charset=utf-8'
+        },
+        body: JSON.stringify({
+          contents: [
+            {
+              role: 'user',
+              parts: [{ text: promptText }]
+            }
+          ]
+        })
+      });
+
+      if (!response.ok) {
+        const errBody = await response.text();
+        throw new Error(`HTTPエラー [${response.status}]: ${errBody}`);
+      }
+
+      const data = await response.json();
+      const reply =
+        data?.candidates?.[0]?.content?.parts
+          ?.map(part => typeof part.text === 'string' ? part.text : '')
+          .join('')
+          .trim();
+
+      if (!reply) {
+        throw new Error('チャッピーの返事が空でした');
+      }
+
+      return reply;
+    }
+
+    // --- チャッピーの返事を作る処理（AIサービスに依存させない） ---
     async function getChappyResponse(userText) {
       const requestGeneration = responseGeneration;
       try {
@@ -517,39 +555,9 @@ ${userText}
 
 この発言に、チャッピーとして自然に返事をしてください。`;
 
-        const response = await fetch(API_URL, {
-          method: 'POST',
-          headers: {
-            'Content-Type': 'application/json; charset=utf-8'
-          },
-          body: JSON.stringify({
-            contents: [
-              {
-                role: 'user',
-                parts: [{ text: promptText }]
-              }
-            ]
-          })
-        });
+        const reply = await requestChappyAI(promptText);
 
         if (requestGeneration !== responseGeneration) return;
-
-        if (!response.ok) {
-          const errBody = await response.text();
-          throw new Error(`HTTPエラー [${response.status}]: ${errBody}`);
-        }
-
-        const data = await response.json();
-        if (requestGeneration !== responseGeneration) return;
-        const reply =
-          data?.candidates?.[0]?.content?.parts
-            ?.map(part => typeof part.text === 'string' ? part.text : '')
-            .join('')
-            .trim();
-
-        if (!reply) {
-          throw new Error('チャッピーの返事が空でした');
-        }
 
         addChappyBubble(reply);
         incrementCount();
