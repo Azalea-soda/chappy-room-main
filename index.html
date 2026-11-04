@@ -486,7 +486,7 @@ ${(profile.absolute_rules || []).map(r => `- ${r}`).join('\n')}
 
       if (!response.ok) {
         const errBody = await response.text();
-        throw new Error(`HTTPエラー [${response.status}]: ${errBody}`);
+        throw new Error(`[AI Worker Error ${response.status}]: ${errBody}`);
       }
 
       const data = await response.json();
@@ -497,7 +497,7 @@ ${(profile.absolute_rules || []).map(r => `- ${r}`).join('\n')}
           .trim();
 
       if (!reply) {
-        throw new Error('チャッピーの返事が空でした');
+        throw new Error('チャッピーの返答テキストが空でした');
       }
 
       return reply;
@@ -506,21 +506,23 @@ ${(profile.absolute_rules || []).map(r => `- ${r}`).join('\n')}
     async function getChappyResponse(userText) {
       const requestGeneration = responseGeneration;
       try {
-        // 外部JSONファイルを読み込んで脳（プロンプト）を構築
         await loadChappyKnowledge();
         const systemPrompt = buildChappySystemPrompt();
-
         const promptText = `${systemPrompt}\n\nお母さんの言葉：「${userText}」\n\nチャッピーとしての返事：`;
 
+        // ① AIへのリクエスト実行
         const reply = await requestChappyAI(promptText);
 
         if (requestGeneration !== responseGeneration) return;
 
+        // チャット画面に返事を表示
         addChappyBubble(reply);
         incrementCount();
 
         currentState = 'speaking';
         setButtonState('speaking');
+
+        // ② 音声合成の実行
         speakChappyVoice(reply, () => {
           if (requestGeneration !== responseGeneration) return;
           currentState = 'idle';
@@ -531,7 +533,8 @@ ${(profile.absolute_rules || []).map(r => `- ${r}`).join('\n')}
         if (requestGeneration !== responseGeneration) return;
         console.error('チャッピー応答エラー:', error);
 
-        const friendlyMessage = 'ごめんにゃ！エラーが出たにゃ！もう一度お話ししてほしいにゃ🐾';
+        // どこでエラーが起きたかを吹き出しに表示して診断
+        const friendlyMessage = `ごめんにゃ！エラーが出たにゃ（詳細: ${error.message}）`;
         addChappyBubble(friendlyMessage);
 
         currentState = 'speaking';
@@ -582,7 +585,8 @@ ${(profile.absolute_rules || []).map(r => `- ${r}`).join('\n')}
         .then(async (response) => {
           if (speechGeneration !== responseGeneration) return null;
           if (!response.ok) {
-            throw new Error(`VOICEVOX通信エラー: HTTP ${response.status}`);
+            const errText = await response.text();
+            throw new Error(`[Voice Worker Error ${response.status}]: ${errText}`);
           }
           return await response.json();
         })
@@ -615,6 +619,7 @@ ${(profile.absolute_rules || []).map(r => `- ${r}`).join('\n')}
         })
         .catch((error) => {
           if (speechGeneration !== responseGeneration) return;
+          console.error("音声エラー:", error);
           if (currentAudio) {
             currentAudio.pause();
             currentAudio = null;
