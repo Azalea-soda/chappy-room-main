@@ -613,6 +613,10 @@ ${(profile.absolute_rules || []).map(r => `- ${r}`).join('\n')}
             finishThisAudio();
           };
 
+audio.onplaying = () => {
+  console.log("音声の再生開始:", performance.now());
+};
+          
           const playResult = audio.play();
           if (playResult && typeof playResult.catch === 'function') {
             playResult.catch((error) => {
