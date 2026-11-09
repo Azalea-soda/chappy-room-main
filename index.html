@@ -554,86 +554,140 @@ ${(profile.absolute_rules || []).map(r => `- ${r}`).join('\n')}
       return text.replace(/[\u{1F600}-\u{1F64F}\u{1F300}-\u{1F5FF}\u{1F680}-\u{1F6FF}\u{1F1E0}-\u{1F1FF}\u{2600}-\u{26FF}\u{2700}-\u{27BF}\u{1F900}-\u{1F9FF}\u{1FA70}-\u{1FAFF}\u{2605}\u{1F43E}\u{1F431}\u{1F436}\u{1F415}\u{1F408}\u{1F33B}\u{1F33C}\u{1F338}\u{1F337}\u{1F339}\u{1F33A}\u{1F340}\u{1F341}\u{1F496}\u{1F497}\u{1F498}\u{1F499}\u{1F49A}\u{1F49B}\u{1F49C}\u{1F49D}\u{1F49E}\u{1F49F}\u{2764}\u{1F90E}\u{1F90F}\u{1F494}\u{1F48C}\u{1F48D}\u{1F48E}\u{1F48F}\u{1F490}\u{1F491}\u{1F492}\u{1F493}]/gu, '');
     }
 
-    function speakChappyVoice(text, callback) {
-      const speechGeneration = responseGeneration;
-      const speechText = removeEmojis(text).trim();
 
-      if (currentAudio) {
-        currentAudio.pause();
-        currentAudio.currentTime = 0;
-        currentAudio = null;
+function speakChappyVoice(text, callback) {
+  const speechGeneration = responseGeneration;
+  const speechText = removeEmojis(text).trim();
+
+  if (currentAudio) {
+    currentAudio.pause();
+    currentAudio.currentTime = 0;
+    currentAudio = null;
+  }
+  if ('speechSynthesis' in window) {
+    window.speechSynthesis.cancel();
+  }
+
+  let callbackCalled = false;
+
+  const finishSpeech = () => {
+    if (callbackCalled) return;
+    if (speechGeneration !== responseGeneration) return;
+    callbackCalled = true;
+    if (callback) callback();
+  };
+
+  if (!speechText) {
+    finishSpeech();
+    return;
+  }
+
+  // 長い文章を短い音声単位に分ける
+  const speechParts = [];
+  const sentences = speechText.match(/[^。！？!?]+[。！？!?]?/g) || [speechText];
+
+  sentences.forEach((sentence) => {
+    let remaining = sentence.trim();
+
+    while (remaining.length > 35) {
+      let cut = remaining.lastIndexOf('、', 35);
+
+      if (cut < 15) {
+        cut = 35;
+      } else {
+        cut += 1;
       }
-      if ('speechSynthesis' in window) {
-        window.speechSynthesis.cancel();
-      }
 
-      let callbackCalled = false;
-      const finishSpeech = () => {
-        if (callbackCalled) return;
-        if (speechGeneration !== responseGeneration) return;
-        callbackCalled = true;
-        if (callback) callback();
-      };
+      speechParts.push(remaining.slice(0, cut).trim());
+      remaining = remaining.slice(cut).trim();
+    }
 
-      if (!speechText) {
-        finishSpeech();
-        return;
-      }
+    if (remaining) {
+      speechParts.push(remaining);
+    }
+  });
 
-      fetch(VOICE_WORKER_URL, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ text: speechText })
+  let partIndex = 0;
+
+  const playNextPart = () => {
+    if (speechGeneration !== responseGeneration) return;
+
+    if (partIndex >= speechParts.length) {
+      finishSpeech();
+      return;
+    }
+
+    const speechPart = speechParts[partIndex];
+    partIndex++;
+
+    fetch(VOICE_WORKER_URL, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ text: speechPart })
+    })
+      .then(async (response) => {
+        if (speechGeneration !== responseGeneration) return null;
+
+        if (!response.ok) {
+          const errText = await response.text();
+          throw new Error(`[Voice Worker Error ${response.status}]: ${errText}`);
+        }
+
+        return await response.json();
       })
-        .then(async (response) => {
-          if (speechGeneration !== responseGeneration) return null;
-          if (!response.ok) {
-            const errText = await response.text();
-            throw new Error(`[Voice Worker Error ${response.status}]: ${errText}`);
-          }
-          return await response.json();
-        })
-        .then((data) => {
-          if (speechGeneration !== responseGeneration || !data) return;
-          if (!data.success || !data.audioUrl) {
-            throw new Error(data?.error || '音声URLを取得できませんでした');
-          }
+      .then((data) => {
+        if (speechGeneration !== responseGeneration || !data) return;
 
-          const audio = new Audio(data.audioUrl);
-          audio.preload = 'auto';
-          currentAudio = audio;
+        if (!data.success || !data.audioUrl) {
+          throw new Error(data?.error || '音声URLを取得できませんでした');
+        }
 
-          const finishThisAudio = () => {
+        const audio = new Audio(data.audioUrl);
+        audio.preload = 'auto';
+        currentAudio = audio;
+
+        audio.onended = () => {
+          if (currentAudio !== audio) return;
+          currentAudio = null;
+          playNextPart();
+        };
+
+        audio.onerror = () => {
+          if (currentAudio !== audio) return;
+          currentAudio = null;
+          finishSpeech();
+        };
+
+        audio.onplaying = () => {
+          console.log("音声の再生開始:", performance.now());
+        };
+
+        const playResult = audio.play();
+
+        if (playResult && typeof playResult.catch === 'function') {
+          playResult.catch((error) => {
             if (currentAudio !== audio) return;
             currentAudio = null;
+            console.error("音声再生エラー:", error);
             finishSpeech();
-          };
-          audio.onended = finishThisAudio;
-          audio.onerror = () => {
-            finishThisAudio();
-          };
+          });
+        }
+      })
+      .catch((error) => {
+        if (speechGeneration !== responseGeneration) return;
+        console.error("音声エラー:", error);
 
-audio.onplaying = () => {
-  console.log("音声の再生開始:", performance.now());
-};
-          
-          const playResult = audio.play();
-          if (playResult && typeof playResult.catch === 'function') {
-            playResult.catch((error) => {
-              finishThisAudio();
-            });
-          }
-        })
-        .catch((error) => {
-          if (speechGeneration !== responseGeneration) return;
-          console.error("音声エラー:", error);
-          if (currentAudio) {
-            currentAudio.pause();
-            currentAudio = null;
-          }
-          finishSpeech();
-        });
-    }
+        if (currentAudio) {
+          currentAudio.pause();
+          currentAudio = null;
+        }
+
+        finishSpeech();
+      });
+  };
+
+  playNextPart();
+}
 
     function setButtonState(state) {
       micButton.className = 'state-' + state;
