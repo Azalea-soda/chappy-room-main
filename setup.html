@@ -1,0 +1,108 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>チャッピー端末登録</title>
+  <style>
+    body {
+      font-family: sans-serif;
+      background: #fff8ee;
+      color: #554638;
+      padding: 30px 20px;
+      max-width: 420px;
+      margin: 40px auto;
+    }
+    h1 { text-align: center; }
+    input, button {
+      box-sizing: border-box;
+      width: 100%;
+      padding: 14px;
+      margin-top: 12px;
+      border-radius: 10px;
+      font-size: 16px;
+    }
+    input { border: 1px solid #cdbda9; }
+    button {
+      border: 0;
+      background: #e9a34b;
+      color: white;
+      font-weight: bold;
+      cursor: pointer;
+    }
+    #message {
+      margin-top: 20px;
+      line-height: 1.7;
+      text-align: center;
+    }
+  </style>
+</head>
+<body>
+  <h1>🐱 チャッピー端末登録</h1>
+  <p>管理者パスワードを入力して、この端末を登録するよ。</p>
+
+  <form id="registerForm">
+    <input
+      id="password"
+      type="password"
+      placeholder="管理者パスワード"
+      autocomplete="current-password"
+      required
+    >
+    <button type="submit">この端末を登録する</button>
+  </form>
+
+  <div id="message" role="status"></div>
+
+  <script>
+    const API_URL = "https://super-violet-bc7e.nanami-moca.workers.dev";
+    const TOKEN_KEY = "chappy_device_token";
+
+    const form = document.getElementById("registerForm");
+    const passwordInput = document.getElementById("password");
+    const message = document.getElementById("message");
+
+    if (localStorage.getItem(TOKEN_KEY)) {
+      form.hidden = true;
+      message.textContent = "この端末はすでに登録されているよ。チャッピーを使える状態だよ🐾";
+    }
+
+    form.addEventListener("submit", async (event) => {
+      event.preventDefault();
+
+      const password = passwordInput.value;
+      message.textContent = "登録中だよ。少し待ってね…";
+      form.querySelector("button").disabled = true;
+
+      try {
+        const response = await fetch(API_URL + "/enroll", {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json"
+          },
+          body: JSON.stringify({
+            password: password,
+            label: "お母さんの端末"
+          })
+        });
+
+        const data = await response.json();
+
+        if (!response.ok || !data.token) {
+          throw new Error(data.error || "登録できなかったよ");
+        }
+
+        localStorage.setItem(TOKEN_KEY, data.token);
+        passwordInput.value = "";
+        form.hidden = true;
+        message.textContent =
+          "登録できたよ！🐱 この端末の準備は完了だにゃ。";
+      } catch (error) {
+        message.textContent =
+          "登録に失敗したよ。パスワードや通信を確認してね。";
+        form.querySelector("button").disabled = false;
+      }
+    });
+  </script>
+</body>
+</html>
