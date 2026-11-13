@@ -240,6 +240,7 @@
   <script>
     // --- API設定 ---
     const API_URL = "https://super-violet-bc7e.nanami-moca.workers.dev";
+    const TOKEN_KEY = "chappy_device_token";
     const VOICE_WORKER_URL = "https://chappy-voicevox-test.nanami-moca.workers.dev/speak";
 
     const chatScrollArea = document.getElementById('chat-scroll-area');
@@ -473,10 +474,16 @@ ${(profile.absolute_rules || []).map(r => `- ${r}`).join('\n')}
 
     // --- AI接続アダプター ---
     async function requestChappyAI(promptText) {
-      const response = await fetch(API_URL, {
+      const deviceToken = localStorage.getItem(TOKEN_KEY);
+      if (!deviceToken) {
+        throw new Error('端末登録が必要です。setup.html から登録してください');
+      }
+
+      const response = await fetch(API_URL + '/chat', {
         method: 'POST',
         headers: {
-          'Content-Type': 'application/json; charset=utf-8'
+          'Content-Type': 'application/json; charset=utf-8',
+          'Authorization': 'Bearer ' + deviceToken
         },
         body: JSON.stringify({
           contents: [
