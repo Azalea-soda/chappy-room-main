@@ -263,20 +263,54 @@
     // --- 外部JSONファイル（プロフィール・記憶）キャッシュ用変数 ---
     let cachedProfile = null;
     let cachedMemory = null;
+    let cachedD1Memories = [];
+    let cachedD1ChappyProfile = [];
 
-    // profile.json と memory.json を読み込む関数
+    // WorkerからD1の記憶・チャッピープロフィールを読み込む
+    async function requestWorkerList(path) {
+      const deviceToken = localStorage.getItem(TOKEN_KEY);
+      if (!deviceToken) throw new Error('端末登録が必要です');
+
+      const response = await fetch(API_URL + path, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json; charset=utf-8',
+          'Authorization': 'Bearer ' + deviceToken
+        },
+        body: JSON.stringify({ action: 'list' })
+      });
+
+      if (!response.ok) {
+        const errBody = await response.text();
+        throw new Error(`[Worker ${path} Error ${response.status}]: ${errBody}`);
+      }
+      return await response.json();
+    }
+
+    // 固定プロフィールはGitHubから、成長する記憶はD1から読み込む
     async function loadChappyKnowledge() {
       try {
         if (!cachedProfile) {
           const resProfile = await fetch('profile.json');
           if (resProfile.ok) cachedProfile = await resProfile.json();
         }
+
+        // memory.jsonはD1への移行確認が終わるまで残し、D1が空の場合の補助として読む
         if (!cachedMemory) {
           const resMemory = await fetch('memory.json');
           if (resMemory.ok) cachedMemory = await resMemory.json();
         }
+
+        if (cachedD1Memories.length === 0) {
+          const data = await requestWorkerList('/memories');
+          if (data && Array.isArray(data.memories)) cachedD1Memories = data.memories;
+        }
+        if (cachedD1ChappyProfile.length === 0) {
+          const data = await requestWorkerList('/chappy-profile');
+          if (data && Array.isArray(data.profile)) cachedD1ChappyProfile = data.profile;
+        }
       } catch (e) {
-        console.warn('設定ファイルの読み込みに失敗しました:', e);
+        console.warn('設定・D1記憶の読み込みに失敗しました:', e);
       }
     }
 
@@ -290,9 +324,20 @@
       };
       const memory = cachedMemory || { mother_profile: {}, conversation_memories: [] };
 
-      // ファイル自体の記憶はそのまま保持し、APIに送る部分だけ直近3件に絞って軽量化
-      const allMemories = memory.conversation_memories || [];
-      const recentMemories = allMemories.slice(-3);
+      // D1に記憶があればD1を使い、まだ空なら従来のmemory.jsonを使う
+      const d1MotherMemories = cachedD1Memories.map(m =>
+        `[${m.category || '記憶'}] ${m.content || ''}`
+      ).filter(Boolean);
+      const legacyMemories = (memory.conversation_memories || []).map(m =>
+        typeof m === 'string' ? m : JSON.stringify(m)
+      );
+      const motherMemoriesForPrompt = d1MotherMemories.length > 0
+        ? d1MotherMemories
+        : legacyMemories;
+
+      const d1ChappyProfile = cachedD1ChappyProfile.map(p =>
+        `[${p.category || 'プロフィール'}] ${p.content || ''}`
+      ).filter(Boolean);
 
       return `
 【チャッピーの基本設定】
@@ -308,7 +353,10 @@ ${(profile.absolute_rules || []).map(r => `- ${r}`).join('\n')}
 - お母さんの好きなもの: ${JSON.stringify(memory.mother_profile?.likes || [])}
 - お母さんの苦手なもの: ${JSON.stringify(memory.mother_profile?.dislikes || [])}
 - ルーティンと健康面での配慮: ${JSON.stringify(memory.mother_profile?.routines_and_health || {})}
-- 最近の思い出ハイライト: ${recentMemories.map(m => `- ${typeof m === 'string' ? m : JSON.stringify(m)}`).join(' / ')}
+- 最近の思い出・大切な記録: ${motherMemoriesForPrompt.join(' / ') || 'まだ記録はありません'}
+
+【チャッピー自身の成長プロフィール】
+${d1ChappyProfile.join(' / ') || 'まだ記録はありません'}
 
 【返答の条件】
 ・返事は2〜3文程度の短い文章にし、お母さんが聞き取りやすく日常会話らしくしてください。
