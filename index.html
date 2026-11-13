@@ -264,6 +264,7 @@
     let cachedProfile = null;
     let cachedMemory = null;
     let cachedD1Memories = [];
+    let d1MemoriesLoaded = false;
     let cachedD1ChappyProfile = [];
 
     // WorkerからD1の記憶・チャッピープロフィールを読み込む
@@ -301,9 +302,12 @@
           if (resMemory.ok) cachedMemory = await resMemory.json();
         }
 
-        if (cachedD1Memories.length === 0) {
+        if (!d1MemoriesLoaded) {
           const data = await requestWorkerList('/memories');
-          if (data && Array.isArray(data.memories)) cachedD1Memories = data.memories;
+          if (data && Array.isArray(data.memories)) {
+            cachedD1Memories = data.memories;
+            d1MemoriesLoaded = true;
+          }
         }
         if (cachedD1ChappyProfile.length === 0) {
           const data = await requestWorkerList('/chappy-profile');
@@ -324,14 +328,16 @@
       };
       const memory = cachedMemory || { mother_profile: {}, conversation_memories: [] };
 
-      // D1に記憶があればD1を使い、まだ空なら従来のmemory.jsonを使う
-      const d1MotherMemories = cachedD1Memories.map(m =>
-        `[${m.category || '記憶'}] ${m.content || ''}`
-      ).filter(Boolean);
+      // D1に記録がある場合は「継続中」だけを会話に使う
+      // D1が本当に空の場合に限り、移行確認用のmemory.jsonを補助として使う
+      const d1MotherMemories = cachedD1Memories
+        .filter(m => m.status === '継続中')
+        .map(m => `[${m.category || '記憶'}] ${m.content || ''}`)
+        .filter(Boolean);
       const legacyMemories = (memory.conversation_memories || []).map(m =>
         typeof m === 'string' ? m : JSON.stringify(m)
       );
-      const motherMemoriesForPrompt = d1MotherMemories.length > 0
+      const motherMemoriesForPrompt = cachedD1Memories.length > 0
         ? d1MotherMemories
         : legacyMemories;
 
