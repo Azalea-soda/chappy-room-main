@@ -721,7 +721,12 @@ function speakChappyVoice(text, callback, replyShownAt) {
         };
 
         audio.onplaying = () => {
-          console.log("音声の再生開始:", performance.now());
+          const playingAt = performance.now();
+          console.log("音声の再生開始:", playingAt);
+          console.log('[計測] 音声URL取得から再生開始まで: ' + Math.round(playingAt - voiceRequestStartedAt) + 'ms');
+          if (typeof replyShownAt === 'number') {
+            console.log('[計測] 文字表示から音声開始まで: ' + Math.round(playingAt - replyShownAt) + 'ms');
+          }
         };
 
         const playResult = audio.play();
