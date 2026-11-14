@@ -260,18 +260,16 @@
     let responseGeneration = 0;
     let currentAudio = null;
 
-    // --- 外部JSONファイル（プロフィール・記憶）キャッシュ用変数 ---
-    let cachedProfile = null;
-    let cachedMemory = null;
+    // --- D1に保存したチャッピーの知識を読み込む ---
+    let cachedD1FixedRules = [];
     let cachedD1Memories = [];
-    let d1MemoriesLoaded = false;
     let cachedD1ChappyProfile = [];
+    let d1KnowledgeLoaded = false;
 
-    // WorkerからD1の記憶・チャッピープロフィールを読み込む
+    // WorkerからD1の各テーブルを読み込む（端末トークンは初回登録後、自動送信）
     async function requestWorkerList(path) {
       const deviceToken = localStorage.getItem(TOKEN_KEY);
       if (!deviceToken) throw new Error('端末登録が必要です');
-
       const response = await fetch(API_URL + path, {
         method: 'POST',
         headers: {
@@ -280,99 +278,67 @@
         },
         body: JSON.stringify({ action: 'list' })
       });
-
       if (!response.ok) {
         const errBody = await response.text();
-        throw new Error(`[Worker ${path} Error ${response.status}]: ${errBody}`);
+        throw new Error('[Worker ' + path + ' Error ' + response.status + ']: ' + errBody);
       }
       return await response.json();
     }
 
-    // 固定プロフィールはGitHubから、成長する記憶はD1から読み込む
+    // 固定ルール・お母さんの記憶・チャッピーのプロフィールをすべてD1から取得
     async function loadChappyKnowledge() {
-      try {
-        if (!cachedProfile) {
-          const resProfile = await fetch('profile.json');
-          if (resProfile.ok) cachedProfile = await resProfile.json();
-        }
-
-        // memory.jsonはD1への移行確認が終わるまで残し、D1が空の場合の補助として読む
-        if (!cachedMemory) {
-          const resMemory = await fetch('memory.json');
-          if (resMemory.ok) cachedMemory = await resMemory.json();
-        }
-
-        if (!d1MemoriesLoaded) {
-          const data = await requestWorkerList('/memories');
-          if (data && Array.isArray(data.memories)) {
-            cachedD1Memories = data.memories;
-            d1MemoriesLoaded = true;
-          }
-        }
-        if (cachedD1ChappyProfile.length === 0) {
-          const data = await requestWorkerList('/chappy-profile');
-          if (data && Array.isArray(data.profile)) cachedD1ChappyProfile = data.profile;
-        }
-      } catch (e) {
-        console.warn('設定・D1記憶の読み込みに失敗しました:', e);
-      }
+      if (d1KnowledgeLoaded) return;
+      const results = await Promise.all([
+        requestWorkerList('/fixed-rules'),
+        requestWorkerList('/memories'),
+        requestWorkerList('/chappy-profile')
+      ]);
+      const rulesData = results[0];
+      const memoriesData = results[1];
+      const profileData = results[2];
+      if (!Array.isArray(rulesData && rulesData.fixedRules)) throw new Error('D1の固定ルールを正しく読み込めませんでした');
+      if (!Array.isArray(memoriesData && memoriesData.memories)) throw new Error('D1のお母さんの記憶を正しく読み込めませんでした');
+      if (!Array.isArray(profileData && profileData.profile)) throw new Error('D1のチャッピープロフィールを正しく読み込めませんでした');
+      if (rulesData.fixedRules.length === 0) throw new Error('D1に継続中の固定ルールがありません');
+      cachedD1FixedRules = rulesData.fixedRules;
+      cachedD1Memories = memoriesData.memories;
+      cachedD1ChappyProfile = profileData.profile;
+      d1KnowledgeLoaded = true;
     }
 
-    // チャッピーの脳（プロンプト）をJSONから動的に組み立てる関数（★思い出はファイルに残しつつ、API送信時のみ直近3件に絞って503を防ぐ軽量化版）
+    // D1の3つのテーブルからチャッピーの会話プロンプトを組み立てる
     function buildChappySystemPrompt() {
-      const profile = cachedProfile || {
-        name: "チャッピー",
-        identity: "お母さんの相棒となる可愛い猫",
-        personality_and_tone: { tone: "「〜にゃ」と話す。優しく短く返事をする。" },
-        absolute_rules: ["絶対にお父さんの話を自分から切り出さない。"]
-      };
-      const memory = cachedMemory || { mother_profile: {}, conversation_memories: [] };
-
-      // D1に記録がある場合は「継続中」だけを会話に使う
-      // D1が本当に空の場合に限り、移行確認用のmemory.jsonを補助として使う
-      const d1MotherMemories = cachedD1Memories
-        .filter(m => m.status === '継続中')
-        .map(m => `[${m.category || '記憶'}] ${m.content || ''}`)
+      const fixedRules = cachedD1FixedRules
+        .filter(rule => rule.status === '継続中')
+        .map(rule => '[' + (rule.category || '固定ルール') + '] ' + (rule.content || ''))
         .filter(Boolean);
-      const legacyMemories = (memory.conversation_memories || []).map(m =>
-        typeof m === 'string' ? m : JSON.stringify(m)
-      );
-      const motherMemoriesForPrompt = cachedD1Memories.length > 0
-        ? d1MotherMemories
-        : legacyMemories;
-
-      const d1ChappyProfile = cachedD1ChappyProfile.map(p =>
-        `[${p.category || 'プロフィール'}] ${p.content || ''}`
-      ).filter(Boolean);
-
-      return `
-【チャッピーの基本設定】
-- 名前: ${profile.name || "チャッピー"}
-- 役割と目的: ${profile.identity || "お母さんの話し相手をする相棒"} (${profile.purpose || "リハビリを感じさせず楽しく声を出す"})
-- 口調とキャラクター: ${profile.personality_and_tone?.tone || "「〜にゃ」と話す少年のような猫"}
-- 好きなもの・日常: ${JSON.stringify(profile.likes_and_dislikes?.likes || [])} / ${JSON.stringify(profile.likes_and_dislikes?.daily_life || [])}
-
-【会話の絶対ルール】
-${(profile.absolute_rules || []).map(r => `- ${r}`).join('\n')}
-
-【お母さんのプロフィールと記憶】
-- お母さんの好きなもの: ${JSON.stringify(memory.mother_profile?.likes || [])}
-- お母さんの苦手なもの: ${JSON.stringify(memory.mother_profile?.dislikes || [])}
-- ルーティンと健康面での配慮: ${JSON.stringify(memory.mother_profile?.routines_and_health || {})}
-- 最近の思い出・大切な記録: ${motherMemoriesForPrompt.join(' / ') || 'まだ記録はありません'}
-
-【チャッピー自身の成長プロフィール】
-${d1ChappyProfile.join(' / ') || 'まだ記録はありません'}
-
-【記憶の確かさ】
-・お母さんの具体的な好みや事実は、読み込んだ記憶に明記されている場合だけ、知っていることとして答えてください。
-・「花や植物が好き」のような大まかな情報から、好きな花の名前などを推測してはいけません。
-・記憶に具体的な答えがない場合は、以前聞いたことがあるように装わず、「まだ聞いていないみたいだにゃ」など自然に伝えてください。
-
-【返答の条件】
-・返事は2〜3文程度の短い文章にし、お母さんが聞き取りやすく日常会話らしくしてください。
-・お母さんの感情を受け止め、急かさず温かく寄り添う返答にしてください。
-`.trim();
+      const motherMemories = cachedD1Memories
+        .filter(memory => memory.status === '継続中')
+        .map(memory => '[' + (memory.category || '記憶') + '] ' + (memory.content || ''))
+        .filter(Boolean);
+      const chappyProfile = cachedD1ChappyProfile
+        .filter(profile => profile.status === '継続中')
+        .map(profile => '[' + (profile.category || 'プロフィール') + '] ' + (profile.content || ''))
+        .filter(Boolean);
+      return [
+        '【チャッピーの固定ルール】',
+        fixedRules.map(rule => '- ' + rule).join('\n'),
+        '',
+        '【お母さんの記憶】',
+        motherMemories.join('\n') || 'まだ記録はありません',
+        '',
+        '【チャッピー自身の成長プロフィール】',
+        chappyProfile.join('\n') || 'まだ記録はありません',
+        '',
+        '【記憶の確かさ】',
+        '・お母さんの具体的な好みや事実は、読み込んだ記憶に明記されている場合だけ、知っていることとして答えてください。',
+        '・大まかな情報から、具体的な好みや事実を推測してはいけません。',
+        '・記憶に具体的な答えがない場合は、以前聞いたことがあるように装わず、「まだ聞いていないみたいだにゃ」など自然に伝えてください。',
+        '',
+        '【返答の条件】',
+        '・お母さんの話をよく聞き、会話の流れに合った自然な長さで返事をしてください。',
+        '・お母さんの感情を受け止め、急かさず温かく寄り添ってください。'
+      ].join('\n').trim();
     }
 
     // 音声認識の準備
