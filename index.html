@@ -706,14 +706,6 @@ function speakChappyVoice(text, callback, replyShownAt) {
           playNextPart();
         };
 
-        audio.onplaying = () => {
-          const playingAt = performance.now();
-          console.log('[計測] 音声URL取得から再生開始まで: ' + Math.round(playingAt - voiceRequestStartedAt) + 'ms');
-          if (typeof replyShownAt === 'number') {
-            console.log('[計測] 文字表示から音声開始まで: ' + Math.round(playingAt - replyShownAt) + 'ms');
-          }
-        };
-
         audio.onerror = () => {
           if (currentAudio !== audio) return;
           currentAudio = null;
