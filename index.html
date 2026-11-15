@@ -259,6 +259,7 @@
     let recognitionActive = false;
     let responseGeneration = 0;
     let currentAudio = null;
+    let prefetchedAudio = null;
 
     // --- D1に保存したチャッピーの知識を読み込む ---
     let cachedD1FixedRules = [];
@@ -448,6 +449,12 @@
           currentAudio.currentTime = 0;
           currentAudio = null;
         }
+        if (prefetchedAudio) {
+          prefetchedAudio.pause();
+          prefetchedAudio.removeAttribute('src');
+          prefetchedAudio.load();
+          prefetchedAudio = null;
+        }
 
         currentState = 'idle';
         setButtonState('idle');
@@ -617,6 +624,12 @@ function speakChappyVoice(text, callback, replyShownAt) {
     currentAudio.currentTime = 0;
     currentAudio = null;
   }
+  if (prefetchedAudio) {
+    prefetchedAudio.pause();
+    prefetchedAudio.removeAttribute('src');
+    prefetchedAudio.load();
+    prefetchedAudio = null;
+  }
   if ('speechSynthesis' in window) {
     window.speechSynthesis.cancel();
   }
@@ -661,20 +674,18 @@ function speakChappyVoice(text, callback, replyShownAt) {
   });
 
   let partIndex = 0;
+  let nextAudioPromise = null;
 
-  const playNextPart = () => {
-    if (speechGeneration !== responseGeneration) return;
-
-    if (partIndex >= speechParts.length) {
-      finishSpeech();
-      return;
-    }
+  // 次の音声を取得し、Audioの先読みを開始する
+  const prepareNextPart = () => {
+    if (speechGeneration !== responseGeneration) return Promise.resolve(null);
+    if (partIndex >= speechParts.length) return Promise.resolve(null);
 
     const speechPart = speechParts[partIndex];
     partIndex++;
     const voiceRequestStartedAt = performance.now();
 
-    fetch(VOICE_WORKER_URL, {
+    return fetch(VOICE_WORKER_URL, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ text: speechPart })
@@ -690,7 +701,7 @@ function speakChappyVoice(text, callback, replyShownAt) {
         return await response.json();
       })
       .then((data) => {
-        if (speechGeneration !== responseGeneration || !data) return;
+        if (speechGeneration !== responseGeneration || !data) return null;
 
         if (!data.success || !data.audioUrl) {
           throw new Error(data?.error || '音声URLを取得できませんでした');
@@ -698,56 +709,90 @@ function speakChappyVoice(text, callback, replyShownAt) {
 
         const audio = new Audio(data.audioUrl);
         audio.preload = 'auto';
-        currentAudio = audio;
+        audio.load();
+        prefetchedAudio = audio;
 
-        audio.onended = () => {
-          if (currentAudio !== audio) return;
-          currentAudio = null;
-          playNextPart();
-        };
-
-        audio.onerror = () => {
-          if (currentAudio !== audio) return;
-          currentAudio = null;
-          finishSpeech();
-        };
-
-        audio.onplaying = () => {
-          const playingAt = performance.now();
-          console.log("音声の再生開始:", playingAt);
-          console.log('[計測] 音声URL取得から再生開始まで: ' + Math.round(playingAt - voiceRequestStartedAt) + 'ms');
-          if (typeof replyShownAt === 'number') {
-            console.log('[計測] 文字表示から音声開始まで: ' + Math.round(playingAt - replyShownAt) + 'ms');
-          }
-        };
-
-        const playResult = audio.play();
-
-        if (playResult && typeof playResult.catch === 'function') {
-          playResult.catch((error) => {
-            if (currentAudio !== audio) return;
-            currentAudio = null;
-            console.error("音声再生エラー:", error);
-            finishSpeech();
-          });
-        }
+        return { audio, voiceRequestStartedAt };
       })
       .catch((error) => {
-        if (speechGeneration !== responseGeneration) return;
-        console.error("音声エラー:", error);
-
-        if (currentAudio) {
-          currentAudio.pause();
-          currentAudio = null;
+        if (speechGeneration === responseGeneration) {
+          console.error("音声取得エラー:", error);
         }
-
-        finishSpeech();
+        return { error };
       });
   };
 
+  const playNextPart = async () => {
+    if (speechGeneration !== responseGeneration) return;
+
+    if (!nextAudioPromise) {
+      finishSpeech();
+      return;
+    }
+
+    const prepared = await nextAudioPromise;
+    if (speechGeneration !== responseGeneration) return;
+
+    if (!prepared) {
+      finishSpeech();
+      return;
+    }
+
+    if (prepared.error) {
+      finishSpeech();
+      return;
+    }
+
+    const audio = prepared.audio;
+    const voiceRequestStartedAt = prepared.voiceRequestStartedAt;
+
+    if (prefetchedAudio === audio) {
+      prefetchedAudio = null;
+    }
+
+    currentAudio = audio;
+
+    // 今の音声を再生している間に、その次の音声を取得しておく
+    nextAudioPromise = prepareNextPart();
+
+    audio.onended = () => {
+      if (currentAudio !== audio) return;
+      currentAudio = null;
+      playNextPart();
+    };
+
+    audio.onerror = () => {
+      if (currentAudio !== audio) return;
+      currentAudio = null;
+      finishSpeech();
+    };
+
+    audio.onplaying = () => {
+      const playingAt = performance.now();
+      console.log("音声の再生開始:", playingAt);
+      console.log('[計測] 音声URL取得から再生開始まで: ' + Math.round(playingAt - voiceRequestStartedAt) + 'ms');
+      if (typeof replyShownAt === 'number') {
+        console.log('[計測] 文字表示から音声開始まで: ' + Math.round(playingAt - replyShownAt) + 'ms');
+      }
+    };
+
+    const playResult = audio.play();
+
+    if (playResult && typeof playResult.catch === 'function') {
+      playResult.catch((error) => {
+        if (currentAudio !== audio) return;
+        currentAudio = null;
+        console.error("音声再生エラー:", error);
+        finishSpeech();
+      });
+    }
+  };
+
+  // まず1文目を取得し、取得できたら再生開始。
+  // その直後から2文目の取得・先読みを並行して進める。
+  nextAudioPromise = prepareNextPart();
   playNextPart();
 }
-
     function setButtonState(state) {
       micButton.className = 'state-' + state;
       if (state === 'idle') {
