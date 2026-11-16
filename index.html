@@ -676,6 +676,42 @@ function speakChappyVoice(text, callback, replyShownAt) {
   let partIndex = 0;
   let nextAudioPromise = null;
 
+  // 音声の読み込み状況を、再生機能に手を加えず記録する
+  const getAudioBufferStatus = (audio) => {
+    const duration = Number.isFinite(audio.duration) ? audio.duration : null;
+    const ranges = [];
+    let bufferedSeconds = 0;
+
+    try {
+      for (let i = 0; i < audio.buffered.length; i++) {
+        const start = audio.buffered.start(i);
+        const end = audio.buffered.end(i);
+        ranges.push({
+          startSec: Number(start.toFixed(2)),
+          endSec: Number(end.toFixed(2))
+        });
+        bufferedSeconds += Math.max(0, end - start);
+      }
+    } catch (error) {}
+
+    const bufferedPercent = duration && duration > 0
+      ? Math.min(100, Math.round((bufferedSeconds / duration) * 100))
+      : null;
+    const fullyBuffered = duration !== null &&
+      ranges.length === 1 &&
+      ranges[0].startSec <= 0.05 &&
+      ranges[0].endSec >= duration - 0.25;
+
+    return {
+      readyState: audio.readyState,
+      networkState: audio.networkState,
+      durationSec: duration === null ? null : Number(duration.toFixed(2)),
+      bufferedPercent,
+      bufferedRanges: ranges,
+      fullyBuffered
+    };
+  };
+
   // 次の音声を取得し、Audioの先読みを開始する
   const prepareNextPart = () => {
     if (speechGeneration !== responseGeneration) return Promise.resolve(null);
@@ -709,6 +745,17 @@ function speakChappyVoice(text, callback, replyShownAt) {
 
         const audio = new Audio(data.audioUrl);
         audio.preload = 'auto';
+
+        // MP3全体がバッファに入ったと確認できた時点を一度だけ記録
+        let fullBufferLogged = false;
+        audio.addEventListener('progress', () => {
+          const status = getAudioBufferStatus(audio);
+          if (!fullBufferLogged && status.fullyBuffered) {
+            fullBufferLogged = true;
+            console.log('[音声計測] 音声全体の読み込み完了', status);
+          }
+        });
+
         audio.load();
         prefetchedAudio = audio;
 
@@ -770,12 +817,14 @@ function speakChappyVoice(text, callback, replyShownAt) {
     audio.onplaying = () => {
       const playingAt = performance.now();
       console.log("音声の再生開始:", playingAt);
+      console.log('[音声計測] 実際の再生開始時', getAudioBufferStatus(audio));
       console.log('[計測] 音声URL取得から再生開始まで: ' + Math.round(playingAt - voiceRequestStartedAt) + 'ms');
       if (typeof replyShownAt === 'number') {
         console.log('[計測] 文字表示から音声開始まで: ' + Math.round(playingAt - replyShownAt) + 'ms');
       }
     };
 
+    console.log('[音声計測] play()呼び出し時', getAudioBufferStatus(audio));
     const playResult = audio.play();
 
     if (playResult && typeof playResult.catch === 'function') {
