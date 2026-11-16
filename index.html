@@ -260,6 +260,7 @@
     let responseGeneration = 0;
     let currentAudio = null;
     let prefetchedAudio = null;
+    let currentAIAbortController = null;
 
     // --- D1に保存したチャッピーの知識を読み込む ---
     let cachedD1FixedRules = [];
@@ -438,6 +439,10 @@
 
       } else if (currentState === 'processing' || currentState === 'speaking') {
         responseGeneration++;
+        if (currentAIAbortController) {
+          currentAIAbortController.abort();
+          currentAIAbortController = null;
+        }
         clearTimeout(finishTimer);
         finishTimer = null;
 
@@ -521,8 +526,8 @@
       });
     }
 
-    // --- AI接続アダプター ---
-    async function requestChappyAI(promptText) {
+    // --- AI接続アダプター（Groq SSEストリーミング） ---
+    async function requestChappyAI(promptText, onText) {
       const deviceToken = localStorage.getItem(TOKEN_KEY);
       if (!deviceToken) {
         throw new Error('端末登録が必要です。setup.html から登録してください');
@@ -536,32 +541,85 @@
           'Authorization': 'Bearer ' + deviceToken
         },
         body: JSON.stringify({
+          stream: true,
           contents: [
             {
               role: 'user',
               parts: [{ text: promptText }]
             }
           ]
-        })
+        }),
+        signal: currentAIAbortController ? currentAIAbortController.signal : undefined
       });
 
       if (!response.ok) {
         const errBody = await response.text();
         throw new Error(`[AI Worker Error ${response.status}]: ${errBody}`);
       }
+      if (!response.body) {
+        throw new Error('ストリーミング応答を読み取れませんでした');
+      }
 
-      const data = await response.json();
-      const reply =
-        data?.candidates?.[0]?.content?.parts
-          ?.map(part => typeof part.text === 'string' ? part.text : '')
-          .join('')
-          .trim();
+      const reader = response.body.getReader();
+      const decoder = new TextDecoder();
+      let buffer = '';
+      let fullText = '';
+      let streamFinished = false;
 
+      const handleSSEFrame = (frame) => {
+        const lines = frame.split(/\r?\n/);
+        for (const line of lines) {
+          if (!line.startsWith('data:')) continue;
+          const dataText = line.slice(5).trim();
+          if (!dataText) continue;
+          if (dataText === '[DONE]') {
+            streamFinished = true;
+            continue;
+          }
+
+          let data;
+          try {
+            data = JSON.parse(dataText);
+          } catch (error) {
+            console.warn('[SSE] JSONフレームを読み飛ばしました:', error);
+            continue;
+          }
+
+          const delta = data?.choices?.[0]?.delta?.content;
+          if (typeof delta === 'string' && delta.length > 0) {
+            fullText += delta;
+            if (onText) onText(delta);
+          }
+        }
+      };
+
+      try {
+        while (!streamFinished) {
+          const { value, done } = await reader.read();
+          if (done) break;
+          buffer += decoder.decode(value, { stream: true });
+          buffer = buffer.replace(/\r\n/g, '\n');
+          let boundary;
+          while ((boundary = buffer.indexOf('\n\n')) !== -1) {
+            const frame = buffer.slice(0, boundary);
+            buffer = buffer.slice(boundary + 2);
+            handleSSEFrame(frame);
+            if (streamFinished) break;
+          }
+        }
+        buffer += decoder.decode();
+        if (buffer.trim() && !streamFinished) handleSSEFrame(buffer);
+      } catch (error) {
+        try { await reader.cancel(); } catch (cancelError) {}
+        throw error;
+      }
+
+      const reply = fullText.trim();
       if (!reply) {
         throw new Error('チャッピーの返答テキストが空でした');
       }
 
-      console.log('[計測] AI応答（通信＋生成＋JSON解析）: ' + Math.round(performance.now() - aiStartedAt) + 'ms');
+      console.log('[計測] AIストリーミング（通信＋生成）: ' + Math.round(performance.now() - aiStartedAt) + 'ms');
       return reply;
     }
 
@@ -569,33 +627,91 @@
       const requestGeneration = responseGeneration;
       try {
         await loadChappyKnowledge();
+        if (requestGeneration !== responseGeneration) return;
+
         const systemPrompt = buildChappySystemPrompt();
         const promptText = `${systemPrompt}\n\nお母さんの言葉：「${userText}」\n\nチャッピーとしての返事：`;
 
-        // ① AIへのリクエスト実行
-        const reply = await requestChappyAI(promptText);
-
-        if (requestGeneration !== responseGeneration) return;
-
-        // チャット画面に返事を表示
-        addChappyBubble(reply);
-        const replyShownAt = performance.now();
-        console.log('[計測] 返事の文字を表示');
-        incrementCount();
-
+        currentAIAbortController = new AbortController();
         currentState = 'speaking';
         setButtonState('speaking');
 
-        // ② 音声合成の実行
-        speakChappyVoice(reply, () => {
+        const replyBubble = addChappyBubble('');
+        let accumulatedText = '';
+        let speechBuffer = '';
+        let firstTextAt = 0;
+        let speechChain = Promise.resolve();
+
+        const enqueueSpeech = (sentence) => {
+          const speechText = sentence.trim();
+          if (!speechText) return;
+          speechChain = speechChain.then(() => new Promise((resolve) => {
+            if (requestGeneration !== responseGeneration) {
+              resolve();
+              return;
+            }
+            speakChappyVoice(speechText, resolve, firstTextAt || performance.now());
+          }));
+        };
+
+        await requestChappyAI(promptText, (delta) => {
           if (requestGeneration !== responseGeneration) return;
-          currentState = 'idle';
-          setButtonState('idle');
-        }, replyShownAt);
+          if (!firstTextAt) firstTextAt = performance.now();
+
+          accumulatedText += delta;
+          replyBubble.textContent += delta;
+          scrollToBottom();
+
+          speechBuffer += delta;
+          const completedSentences = speechBuffer.match(/[^。！？!?]+[。！？!?]+/g) || [];
+          if (completedSentences.length > 0) {
+            completedSentences.forEach(enqueueSpeech);
+            const spokenLength = completedSentences.join('').length;
+            speechBuffer = speechBuffer.slice(spokenLength);
+          }
+        });
+
+        if (requestGeneration !== responseGeneration) return;
+        currentAIAbortController = null;
+
+        if (speechBuffer.trim()) {
+          enqueueSpeech(speechBuffer);
+          speechBuffer = '';
+        }
+
+        if (!accumulatedText.trim()) {
+          throw new Error('チャッピーの返答テキストが空でした');
+        }
+
+        incrementCount();
+        console.log('[計測] ストリーミング返答の全文受信');
+        await speechChain;
+
+        if (requestGeneration !== responseGeneration) return;
+        currentState = 'idle';
+        setButtonState('idle');
 
       } catch (error) {
         if (requestGeneration !== responseGeneration) return;
+        currentAIAbortController = null;
         console.error('チャッピー応答エラー:', error);
+
+        responseGeneration++;
+        const errorGeneration = responseGeneration;
+        if (currentAudio) {
+          currentAudio.pause();
+          currentAudio.currentTime = 0;
+          currentAudio = null;
+        }
+        if (prefetchedAudio) {
+          prefetchedAudio.pause();
+          prefetchedAudio.removeAttribute('src');
+          prefetchedAudio.load();
+          prefetchedAudio = null;
+        }
+        if ('speechSynthesis' in window) {
+          window.speechSynthesis.cancel();
+        }
 
         const friendlyMessage = `ごめんにゃ！エラーが出たにゃ（詳細: ${error.message}）`;
         addChappyBubble(friendlyMessage);
@@ -603,7 +719,7 @@
         currentState = 'speaking';
         setButtonState('speaking');
         speakChappyVoice(friendlyMessage, () => {
-          if (requestGeneration !== responseGeneration) return;
+          if (errorGeneration !== responseGeneration) return;
           currentState = 'idle';
           setButtonState('idle');
         });
@@ -873,6 +989,7 @@ function speakChappyVoice(text, callback, replyShownAt) {
       bubble.textContent = text;
       chatScrollArea.appendChild(bubble);
       scrollToBottom();
+      return bubble;
     }
 
     function scrollToBottom() {
