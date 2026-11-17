@@ -774,7 +774,11 @@
             notifyPlayback();
           } catch (error) {
             if (generation === responseGeneration && error.name !== 'AbortError') {
-              console.error('音声生成エラー（このまとまりはスキップ）:', error);
+              cancelled = true;
+              textFinished = true;
+              notifySynthesis();
+              notifyPlayback();
+              throw error;
             }
           } finally {
             if (currentVoiceAbortController === controller) currentVoiceAbortController = null;
@@ -785,7 +789,7 @@
       })();
 
       const playbackWorker = (async () => {
-        while (generation === responseGeneration) {
+        while (!cancelled && generation === responseGeneration) {
           if (!audioQueue.length) {
             if (synthesisFinished && textFinished && !textQueue.length) break;
             await new Promise(resolve => { wakePlayback = resolve; });
@@ -894,6 +898,8 @@
 
       } catch (error) {
         if (requestGeneration !== responseGeneration) return;
+        const failedPipeline = speechPipelineControls.get(requestGeneration);
+        if (failedPipeline) failedPipeline.cancel();
         currentAIAbortController = null;
         if (currentVoiceAbortController) {
           currentVoiceAbortController.abort();
