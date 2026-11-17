@@ -23,11 +23,13 @@ Keep the existing record fields `id, category, content, created_at, updated_at` 
 - The development Worker is based on the user's supplied 409-line Worker source. Existing device-authenticated app routes, enrollment behavior, Groq GPT-OSS 120B connection, and SSE streaming path have been retained in the draft.
 - The draft adds admin login/logout and allowlisted record operations. It checks the existing `CHAPPY_ADMIN_PASSWORD`, stores only a SHA-256 hash of a random admin token in `admin_sessions`, and gives the token a 30-minute expiry.
 - Admin CORS is restricted to `https://azalea-soda.github.io`; ordinary app API CORS remains separate.
-- Read-only inspection of the live D1 confirmed all three tables have the six fields `id, category, content, created_at, updated_at, status`. M and C IDs use `M001...` and `C001...`; fixed-rule IDs use `FR001...` (observed through `FR023`). Fixed-rule creation can therefore use the same counter approach with a three-character prefix offset.
+- Read-only inspection of the live production D1 previously confirmed all three memory tables have the six fields `id, category, content, created_at, updated_at, status`. M and C IDs use `M001...` and `C001...`; fixed-rule IDs use `FR001...` (observed through `FR023`). This information is used only for compatibility planning; no production writes have been made.
 - `preview/admin.html` has login/logout, M/C/fixed-rule tabs, list, add/edit, append, status change, and delete controls. Its `API_URL` is intentionally empty, so it cannot contact any Worker yet.
-- The status control is being expanded to accept all three allowed values: `継続中`, `終了`, and `取り消し`.
-- `migrations/0001_admin_sessions.sql` exists but has not been applied to any database.
-- The latest Worker change (commit `3e83934a9920b658c9a7d37ccea30e3c571b3654`) blocks fixed-rule creation pending ID verification. Its GitHub Actions `node --check worker.js` run succeeded.
+- The admin status control and Worker both accept `継続中`, `終了`, and `取り消し`.
+- The user created an isolated Cloudflare D1 database named `chappy-memory-test` and successfully created `mother_memories`, `chappy_profile`, `fixed_rules`, and `admin_sessions` plus the two admin-session indexes. The database contains no production memory data. Cloudflare's internal `_cf_KV` table was left untouched.
+- The Worker now generates fixed-rule IDs with the verified `FR` prefix and three-character numeric suffix. The local SQLite compatibility check produced the expected next IDs from test rows: `M010`, `C003`, and `FR024`.
+- The Worker now creates `admin_login_attempts` lazily and limits five failed password attempts from the same client IP within a 15-minute window, followed by a 15-minute block. The lockout SQL was exercised against local SQLite; Cloudflare D1 runtime behavior remains untested.
+- GitHub Actions `node --check worker.js` succeeded for the latest Worker commit. This confirms JavaScript syntax only, not Cloudflare runtime, D1, or complete security.
 - A syntax check is not proof of D1 schema compatibility, runtime behavior, or complete security.
 - The repository contains no authoritative D1 schema definition or migration for the existing M/C/fixed-rules tables. Actual production D1 contents and schema have not been inspected from this environment.
 
@@ -67,4 +69,4 @@ All admin endpoints are POST and require the separate, valid, unexpired admin se
 - Validate required fields and bounded text lengths for every action.
 
 ## Test-only migration
-`migrations/0001_admin_sessions.sql` creates the admin session table and indexes. Apply it only to the isolated TEST D1 database, never production without separate explicit approval.
+`migrations/0001_admin_sessions.sql` creates the admin session table and indexes. The user has already created the equivalent schema manually in `chappy-memory-test`; do not rerun it blindly. Apply any future schema changes only to the isolated TEST D1 database, never production without separate explicit approval.
