@@ -153,9 +153,12 @@ export default {
         if (!session) return json({ error: "管理者認証の有効期限が切れています" }, 401);
         const auth = request.headers.get("Authorization") || "";
         const tokenHash = await hashToken(auth.slice(7).trim());
-        await env.DB.prepare(
+        const revoked = await env.DB.prepare(
           "UPDATE admin_sessions SET revoked_at = ? WHERE token_hash = ? AND revoked_at IS NULL"
         ).bind(now(), tokenHash).run();
+        if ((revoked.meta?.changes ?? 0) < 1) {
+          return json({ error: "ログアウト処理を確認できませんでした" }, 409);
+        }
         return json({ success: true });
       }
 
@@ -202,7 +205,9 @@ export default {
           const result = await env.DB.prepare(
             "UPDATE " + table + " SET category = ?, content = ?, updated_at = ? WHERE id = ?"
           ).bind(body.category.trim(), body.content.trim(), now(), body.id).run();
-          return json({ success: true, changes: result.meta?.changes ?? 0 });
+          const changes = result.meta?.changes ?? 0;
+          if (changes < 1) return json({ error: "指定された記録がありません" }, 404);
+          return json({ success: true, changes });
         }
 
         if (body.action === "append") {
@@ -226,7 +231,9 @@ export default {
           const result = await env.DB.prepare(
             "UPDATE " + table + " SET status = ?, updated_at = ? WHERE id = ?"
           ).bind(body.status, now(), body.id).run();
-          return json({ success: true, changes: result.meta?.changes ?? 0 });
+          const changes = result.meta?.changes ?? 0;
+          if (changes < 1) return json({ error: "指定された記録がありません" }, 404);
+          return json({ success: true, changes });
         }
 
         if (body.action === "delete") {
@@ -234,7 +241,9 @@ export default {
           const result = await env.DB.prepare(
             "DELETE FROM " + table + " WHERE id = ?"
           ).bind(body.id).run();
-          return json({ success: true, changes: result.meta?.changes ?? 0 });
+          const changes = result.meta?.changes ?? 0;
+          if (changes < 1) return json({ error: "指定された記録がありません" }, 404);
+          return json({ success: true, changes });
         }
         return json({ error: "不明な操作です" }, 400);
       }
