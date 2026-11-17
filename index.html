@@ -880,6 +880,7 @@
 
     async function getChappyResponse(userText) {
       const requestGeneration = responseGeneration;
+      let voicePipelineResult = null;
       try {
         await loadChappyKnowledge();
         if (requestGeneration !== responseGeneration) return;
@@ -896,7 +897,7 @@
         let speechBuffer = '';
         let firstTextAt = 0;
         // 音声側の失敗をすぐ捕まえ、AIの文章生成も早めに中断する。
-        const voicePipelineResult = speakChappyStream(requestGeneration).then(
+        voicePipelineResult = speakChappyStream(requestGeneration).then(
           () => ({ ok: true }),
           error => {
             if (requestGeneration === responseGeneration && currentAIAbortController) {
@@ -951,8 +952,8 @@
           currentVoiceAbortController.abort();
           currentVoiceAbortController = null;
         }
-        const voiceResult = await voicePipelineResult;
-        const responseError = !voiceResult.ok ? voiceResult.error : error;
+        const voiceResult = voicePipelineResult ? await voicePipelineResult : null;
+        const responseError = voiceResult && !voiceResult.ok ? voiceResult.error : error;
         console.error('チャッピー応答エラー:', responseError);
 
         responseGeneration++;
