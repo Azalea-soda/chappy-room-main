@@ -776,6 +776,14 @@
             if (generation === responseGeneration && error.name !== 'AbortError') {
               cancelled = true;
               textFinished = true;
+              // 次の音声生成に失敗したら、再生中・待機中の音声も止めて後片付けする。
+              if (currentAudio) currentAudio.pause();
+              if (prefetchedAudio) {
+                prefetchedAudio.pause();
+                prefetchedAudio.removeAttribute('src');
+                prefetchedAudio.load();
+                prefetchedAudio = null;
+              }
               notifySynthesis();
               notifyPlayback();
               throw error;
