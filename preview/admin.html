@@ -185,11 +185,9 @@
       actions.className = 'record-actions';
       actions.append(
         makeButton('修正する', 'secondary', () => beginEdit(record)),
-        makeButton(record.status === '継続中' ? '終了にする' : '継続中に戻す', 'secondary', () => changeStatus(record))
-      );
-      actions.append(
-        makeButton('削除する', 'danger', () => deleteRecord(record)),
-        document.createElement('span')
+        makeButton('追記する', 'secondary', () => appendRecord(record)),
+        makeButton(record.status === '継続中' ? '終了にする' : '継続中に戻す', 'secondary', () => changeStatus(record)),
+        makeButton('削除する', 'danger', () => deleteRecord(record))
       );
       card.append(meta, body, actions);
       recordsEl.append(card);
@@ -203,6 +201,16 @@
     saveButton.textContent = '修正を保存';
     cancelEditButton.hidden = false;
     window.scrollTo({ top: 0, behavior: 'smooth' });
+  }
+  async function appendRecord(record) {
+    const addition = window.prompt('この記録に追記する内容を入力してね');
+    if (addition === null || !addition.trim()) return;
+    try {
+      await api('/admin/records', {
+        action: 'append', room: activeRoom, id: record.id, content: addition.trim()
+      });
+      await loadRecords();
+    } catch (error) { setMessage(error.message); }
   }
   async function changeStatus(record) {
     const next = record.status === '継続中' ? '終了' : '継続中';
@@ -264,7 +272,16 @@
 
   cancelEditButton.addEventListener('click', resetForm);
   document.getElementById('refreshButton').addEventListener('click', () => loadRecords().catch(e => setMessage(e.message)));
-  document.getElementById('logoutButton').addEventListener('click', showLogin);
+  document.getElementById('logoutButton').addEventListener('click', async () => {
+    try {
+      if (adminToken) await api('/admin/logout', {});
+    } catch (error) {
+      setMessage(error.message);
+    } finally {
+      showLogin();
+      setMessage('ログアウトしたよ。');
+    }
+  });
   document.querySelectorAll('[data-room]').forEach(button => {
     button.addEventListener('click', async () => {
       activeRoom = button.dataset.room;
