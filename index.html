@@ -638,15 +638,21 @@
       const chunks = [];
       let rest = buffer;
       while (rest) {
-        const punctuation = rest.match(/[、。！？!?]/);
-        if (punctuation && punctuation.index !== undefined) {
-          const end = punctuation.index + 1;
-          const candidate = rest.slice(0, end).trim();
+        // 「、」が短すぎるときは、その先の「。」なども探す。
+        const punctuationPattern = /[、。！？!?]/g;
+        let punctuation;
+        let chosenEnd = -1;
+        while ((punctuation = punctuationPattern.exec(rest)) !== null) {
+          const candidate = rest.slice(0, punctuation.index + 1).trim();
           if (/[。！？!?]/.test(punctuation[0]) || candidate.length >= 12 || flush) {
-            chunks.push(candidate);
-            rest = rest.slice(end).trimStart();
-            continue;
+            chosenEnd = punctuation.index + 1;
+            break;
           }
+        }
+        if (chosenEnd > 0) {
+          chunks.push(rest.slice(0, chosenEnd).trim());
+          rest = rest.slice(chosenEnd).trimStart();
+          continue;
         }
 
         // 句読点が届かなくても、自然な語尾が見つかった場合だけ先に区切る。
