@@ -2,10 +2,14 @@ export default {
   async fetch(request, env) {
     const allowedAdminOrigin = "https://azalea-soda.github.io";
     const requestOrigin = request.headers.get("Origin") || "";
+    const url = new URL(request.url);
+    const path = url.pathname.replace(/\/+$/, "") || "/";
+    const isAdminRoute = path.startsWith("/admin/");
     const cors = {
-      "Access-Control-Allow-Origin": "*",
+      "Access-Control-Allow-Origin": isAdminRoute ? allowedAdminOrigin : "*",
       "Access-Control-Allow-Methods": "POST, OPTIONS",
       "Access-Control-Allow-Headers": "Content-Type, Authorization",
+      ...(isAdminRoute ? { "Vary": "Origin" } : {}),
     };
     const headers = {
       ...cors,
@@ -13,6 +17,17 @@ export default {
     };
     const json = (data, status = 200) =>
       new Response(JSON.stringify(data), { status, headers });
+
+    // Admin preflight and actual requests are restricted to the GitHub Pages origin.
+    if (isAdminRoute && requestOrigin !== allowedAdminOrigin) {
+      return new Response(
+        request.method === "OPTIONS" ? null : JSON.stringify({ error: "管理画面の接続元が許可されていません" }),
+        {
+          status: 403,
+          headers: isAdminRoute ? { "Vary": "Origin", "Content-Type": "application/json; charset=utf-8" } : headers,
+        }
+      );
+    }
     if (request.method === "OPTIONS") {
       return new Response(null, { headers: cors });
     }
@@ -22,8 +37,6 @@ export default {
 
     try {
       if (!env.DB) return json({ error: "D1データベースが未設定です" }, 500);
-      const url = new URL(request.url);
-      const path = url.pathname.replace(/\/+$/, "") || "/";
       const body = await request.json();
       const now = () => new Date().toISOString();
       const validText = (v, max = 10000) =>
@@ -59,11 +72,6 @@ export default {
       };
 
       // Admin routes are isolated from device-token authentication.
-      const isAdminRoute = path.startsWith("/admin/");
-      if (isAdminRoute && requestOrigin !== allowedAdminOrigin) {
-        return json({ error: "管理画面の接続元が許可されていません" }, 403);
-      }
-
       if (path === "/admin/login") {
         if (!env.CHAPPY_ADMIN_PASSWORD) {
           return json({ error: "管理者パスワードが未設定です" }, 500);
