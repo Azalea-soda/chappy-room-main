@@ -22,7 +22,9 @@ The existing record shape remains `id, category, content, created_at, updated_at
 ## Current implementation state
 - Existing Worker pasted by the developer supports device-authenticated list/create/status/append for M and C, and list-only for fixed rules.
 - Existing preview frontend reads all three D1 tables but does not save conversation memories.
-- `preview/admin.html` is an administrator UI draft that expects `/admin/login` and `/admin/records`. Those Worker endpoints must be implemented and reviewed before the page can function.
+- `preview/admin.html` now includes add, edit, append, status, delete, login, and logout UI flows. Its API URL remains intentionally empty until a separate test Worker is ready.
+- `worker.js` has been added on this development branch based on the 409-line Worker source supplied by the user. It includes separate admin login/session validation and allowlisted admin record operations while retaining the existing device-authenticated app routes and Groq streaming path.
+- The admin Worker draft must not be deployed yet. The `fixed_rules` ID convention and exact D1 schema have not been verified; the current draft uses a provisional UUID-style `F-` ID for new fixed rules.
 - No Worker deployment, D1 migration, production write, or merge to main is authorized by this branch work.
 - Before any live test, establish a separate test D1 database and bind it only to the test Worker, or provide another verified isolation boundary.
 
@@ -66,3 +68,13 @@ All admin routes are POST endpoints. They must reject requests unless the caller
 - Create a separate test Worker and separate test D1 binding before any admin write test. Apply `migrations/0001_admin_sessions.sql` only to that test D1 first.
 - Verify the existing D1 table schemas (especially `fixed_rules` and `id_counters`) before implementing fixed-rule create/update/delete or applying any migration.
 - No production Worker deployment, production D1 write/migration, or merge to `main` is authorized by this development work.
+
+
+## Latest code review notes
+- The shared M/C ID generator is defined before the admin route handler so the admin create action can call it safely.
+- The admin browser page sends logout to the Worker to revoke the session, and now exposes an append action.
+- A GitHub Actions workflow runs `node --check worker.js` on changes to this branch.
+- Do not treat a passing syntax check as proof of D1 compatibility or security. Runtime tests require an isolated Worker and isolated D1 database.
+- Before testing, inspect the actual `fixed_rules` schema and existing ID values. Replace the provisional fixed-rule ID generator if the table uses another convention.
+- Admin CORS currently checks the GitHub Pages origin on admin POST routes; verify the actual published admin page origin and ensure preflight behavior matches it before test deployment.
+- The user-supplied source is the reference for preserving existing app behavior. Compare the final Worker diff against it before any deployment.
