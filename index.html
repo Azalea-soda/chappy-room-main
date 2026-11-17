@@ -644,7 +644,7 @@
         let chosenEnd = -1;
         while ((punctuation = punctuationPattern.exec(rest)) !== null) {
           const candidate = rest.slice(0, punctuation.index + 1).trim();
-          if (/[。！？!?]/.test(punctuation[0]) || candidate.length >= 12 || flush) {
+          if (/[。！？!?]/.test(punctuation[0]) || candidate.length >= 12) {
             chosenEnd = punctuation.index + 1;
             break;
           }
