@@ -284,13 +284,23 @@
   cancelEditButton.addEventListener('click', resetForm);
   document.getElementById('refreshButton').addEventListener('click', () => loadRecords().catch(e => setMessage(e.message)));
   document.getElementById('logoutButton').addEventListener('click', async () => {
+    let serverRevoked = !adminToken;
+    let revokeError = '';
     try {
-      if (adminToken) await api('/admin/logout', {});
+      if (adminToken) {
+        await api('/admin/logout', {});
+        serverRevoked = true;
+      }
     } catch (error) {
-      setMessage(error.message);
+      revokeError = error.message;
     } finally {
+      // サーバー側の結果にかかわらず、この画面の認証情報は破棄する。
       showLogin();
-      setMessage('ログアウトしたよ。');
+      if (serverRevoked) {
+        setMessage('ログアウトしたよ。');
+      } else {
+        setMessage('この画面からはログアウトしたよ。ただしサーバー側の無効化は確認できなかったよ。セッションは最長30分で期限切れになるよ。' + (revokeError ? '\n' + revokeError : ''));
+      }
     }
   });
   document.querySelectorAll('[data-room]').forEach(button => {
