@@ -1,0 +1,281 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="robots" content="noindex,nofollow">
+  <title>チャッピー記憶管理</title>
+  <style>
+    * { box-sizing: border-box; }
+    body { margin: 0; padding: 20px 14px 40px; background: #fff8ee; color: #554638; font-family: sans-serif; }
+    main { width: min(760px, 100%); margin: 0 auto; }
+    h1 { text-align: center; font-size: 1.55rem; }
+    h2 { font-size: 1.15rem; margin: 22px 0 10px; }
+    p { line-height: 1.65; }
+    .panel { background: #fff; border: 1px solid #eadcc9; border-radius: 14px; padding: 16px; margin: 14px 0; }
+    input, textarea, select, button { width: 100%; font: inherit; padding: 12px; border-radius: 9px; }
+    input, textarea, select { border: 1px solid #cdbda9; background: #fff; color: inherit; }
+    textarea { min-height: 100px; resize: vertical; }
+    button { border: 0; background: #d99545; color: white; font-weight: 700; cursor: pointer; margin-top: 9px; }
+    button.secondary { background: #8d8174; }
+    button.danger { background: #b84c43; }
+    button:disabled { opacity: .55; cursor: wait; }
+    label { display: block; font-weight: 700; margin: 12px 0 6px; }
+    .tabs { display: grid; grid-template-columns: repeat(3, 1fr); gap: 7px; }
+    .tabs button { margin: 0; padding: 10px 5px; background: #e9dfd2; color: #554638; }
+    .tabs button[aria-pressed="true"] { background: #d99545; color: white; }
+    .record { border: 1px solid #eadcc9; border-radius: 11px; padding: 13px; margin: 10px 0; background: #fffdf9; }
+    .record-meta { color: #786b5d; font-size: .85rem; }
+    .record-content { white-space: pre-wrap; overflow-wrap: anywhere; line-height: 1.6; margin: 8px 0; }
+    .record-actions { display: grid; grid-template-columns: 1fr 1fr; gap: 7px; }
+    .record-actions button { margin: 0; }
+    #message { min-height: 1.5em; white-space: pre-wrap; }
+    .muted { color: #786b5d; font-size: .9rem; }
+    [hidden] { display: none !important; }
+  </style>
+</head>
+<body>
+<main>
+  <h1>🐱 チャッピーの記憶管理</h1>
+  <p class="muted">管理者専用ページだよ。お母さんの端末登録とは別に、管理者パスワードで認証するよ。</p>
+
+  <section id="loginPanel" class="panel">
+    <h2>管理者ログイン</h2>
+    <form id="loginForm">
+      <label for="adminPassword">管理者パスワード</label>
+      <input id="adminPassword" type="password" autocomplete="current-password" required>
+      <button id="loginButton" type="submit">ログイン</button>
+    </form>
+  </section>
+
+  <section id="manager" hidden>
+    <div class="panel">
+      <div class="tabs" role="group" aria-label="記憶の部屋">
+        <button type="button" data-room="mother_memories" aria-pressed="true">M：お母さん</button>
+        <button type="button" data-room="chappy_profile" aria-pressed="false">C：チャッピー</button>
+        <button type="button" data-room="fixed_rules" aria-pressed="false">固定ルール</button>
+      </div>
+      <p class="muted">記憶の追加・修正・状態変更・削除ができるよ。固定ルールは自動記憶の対象にはならないよ。</p>
+    </div>
+
+    <section class="panel">
+      <h2 id="formTitle">記憶を追加</h2>
+      <form id="recordForm">
+        <label for="category">分類</label>
+        <input id="category" maxlength="100" required placeholder="例：好きなこと、思い出、気持ち">
+        <label for="content">内容</label>
+        <textarea id="content" maxlength="10000" required placeholder="記憶する内容"></textarea>
+        <button id="saveButton" type="submit">追加する</button>
+        <button id="cancelEditButton" class="secondary" type="button" hidden>編集をやめる</button>
+      </form>
+    </section>
+
+    <section class="panel">
+      <h2>保存されている記録</h2>
+      <button id="refreshButton" class="secondary" type="button">一覧を更新</button>
+      <div id="records"></div>
+    </section>
+    <button id="logoutButton" class="secondary" type="button">ログアウト</button>
+  </section>
+
+  <p id="message" role="status" aria-live="polite"></p>
+</main>
+<script>
+(() => {
+  'use strict';
+  const API_URL = 'https://super-violet-bc7e.nanami-moca.workers.dev';
+  const TOKEN_KEY = 'chappy_admin_session';
+  const loginPanel = document.getElementById('loginPanel');
+  const manager = document.getElementById('manager');
+  const loginForm = document.getElementById('loginForm');
+  const passwordInput = document.getElementById('adminPassword');
+  const message = document.getElementById('message');
+  const recordForm = document.getElementById('recordForm');
+  const categoryInput = document.getElementById('category');
+  const contentInput = document.getElementById('content');
+  const recordsEl = document.getElementById('records');
+  const saveButton = document.getElementById('saveButton');
+  const formTitle = document.getElementById('formTitle');
+  const cancelEditButton = document.getElementById('cancelEditButton');
+  let adminToken = sessionStorage.getItem(TOKEN_KEY) || '';
+  let activeRoom = 'mother_memories';
+  let editingId = null;
+  let currentRecords = [];
+
+  const roomNames = {
+    mother_memories: 'M：お母さんの記憶',
+    chappy_profile: 'C：チャッピーのプロフィール',
+    fixed_rules: '固定ルール'
+  };
+
+  function setMessage(text) { message.textContent = text || ''; }
+  function showManager() {
+    loginPanel.hidden = true;
+    manager.hidden = false;
+  }
+  function showLogin() {
+    adminToken = '';
+    sessionStorage.removeItem(TOKEN_KEY);
+    loginPanel.hidden = false;
+    manager.hidden = true;
+    recordsEl.replaceChildren();
+    resetForm();
+  }
+  function resetForm() {
+    editingId = null;
+    recordForm.reset();
+    formTitle.textContent = '記録を追加：' + roomNames[activeRoom];
+    saveButton.textContent = '追加する';
+    cancelEditButton.hidden = true;
+  }
+  async function api(path, body, token = adminToken) {
+    const response = await fetch(API_URL + path, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json; charset=utf-8',
+        ...(token ? { 'Authorization': 'Bearer ' + token } : {})
+      },
+      body: JSON.stringify(body)
+    });
+    const data = await response.json().catch(() => ({}));
+    if (!response.ok) {
+      if (response.status === 401) showLogin();
+      throw new Error(data.error || '通信に失敗したよ（' + response.status + '）');
+    }
+    return data;
+  }
+  async function loadRecords() {
+    setMessage('記録を読み込んでいるよ…');
+    recordsEl.replaceChildren();
+    const data = await api('/admin/records', { action: 'list', room: activeRoom });
+    currentRecords = Array.isArray(data.records) ? data.records : [];
+    renderRecords();
+    setMessage(currentRecords.length + '件の記録を読み込んだよ。');
+  }
+  function makeButton(label, className, handler) {
+    const button = document.createElement('button');
+    button.type = 'button';
+    button.textContent = label;
+    if (className) button.className = className;
+    button.addEventListener('click', handler);
+    return button;
+  }
+  function renderRecords() {
+    recordsEl.replaceChildren();
+    if (!currentRecords.length) {
+      const empty = document.createElement('p');
+      empty.className = 'muted';
+      empty.textContent = 'まだ記録がないよ。';
+      recordsEl.append(empty);
+      return;
+    }
+    for (const record of currentRecords) {
+      const card = document.createElement('article');
+      card.className = 'record';
+      const meta = document.createElement('div');
+      meta.className = 'record-meta';
+      meta.textContent = (record.id || '') + ' ／ ' + (record.category || '') + ' ／ ' + (record.status || '');
+      const body = document.createElement('div');
+      body.className = 'record-content';
+      body.textContent = record.content || '';
+      const actions = document.createElement('div');
+      actions.className = 'record-actions';
+      actions.append(
+        makeButton('修正する', 'secondary', () => beginEdit(record)),
+        makeButton(record.status === '継続中' ? '終了にする' : '継続中に戻す', 'secondary', () => changeStatus(record))
+      );
+      actions.append(
+        makeButton('削除する', 'danger', () => deleteRecord(record)),
+        document.createElement('span')
+      );
+      card.append(meta, body, actions);
+      recordsEl.append(card);
+    }
+  }
+  function beginEdit(record) {
+    editingId = record.id;
+    categoryInput.value = record.category || '';
+    contentInput.value = record.content || '';
+    formTitle.textContent = '記録を修正：' + record.id;
+    saveButton.textContent = '修正を保存';
+    cancelEditButton.hidden = false;
+    window.scrollTo({ top: 0, behavior: 'smooth' });
+  }
+  async function changeStatus(record) {
+    const next = record.status === '継続中' ? '終了' : '継続中';
+    if (!window.confirm(record.id + ' を「' + next + '」に変更する？')) return;
+    try {
+      await api('/admin/records', { action: 'status', room: activeRoom, id: record.id, status: next });
+      await loadRecords();
+    } catch (error) { setMessage(error.message); }
+  }
+  async function deleteRecord(record) {
+    if (!window.confirm('「' + (record.content || '').slice(0, 70) + '」を完全に削除するよ。元に戻せないけど、本当にいい？')) return;
+    try {
+      await api('/admin/records', { action: 'delete', room: activeRoom, id: record.id });
+      if (editingId === record.id) resetForm();
+      await loadRecords();
+    } catch (error) { setMessage(error.message); }
+  }
+
+  loginForm.addEventListener('submit', async (event) => {
+    event.preventDefault();
+    const password = passwordInput.value;
+    document.getElementById('loginButton').disabled = true;
+    setMessage('認証中だよ…');
+    try {
+      const data = await api('/admin/login', { password }, '');
+      if (!data.adminToken) throw new Error('認証トークンを受け取れなかったよ。');
+      adminToken = data.adminToken;
+      sessionStorage.setItem(TOKEN_KEY, adminToken);
+      passwordInput.value = '';
+      showManager();
+      await loadRecords();
+    } catch (error) {
+      setMessage(error.message);
+    } finally {
+      document.getElementById('loginButton').disabled = false;
+    }
+  });
+
+  recordForm.addEventListener('submit', async (event) => {
+    event.preventDefault();
+    saveButton.disabled = true;
+    try {
+      const action = editingId ? 'update' : 'create';
+      await api('/admin/records', {
+        action,
+        room: activeRoom,
+        id: editingId,
+        category: categoryInput.value.trim(),
+        content: contentInput.value.trim()
+      });
+      resetForm();
+      await loadRecords();
+    } catch (error) {
+      setMessage(error.message);
+    } finally {
+      saveButton.disabled = false;
+    }
+  });
+
+  cancelEditButton.addEventListener('click', resetForm);
+  document.getElementById('refreshButton').addEventListener('click', () => loadRecords().catch(e => setMessage(e.message)));
+  document.getElementById('logoutButton').addEventListener('click', showLogin);
+  document.querySelectorAll('[data-room]').forEach(button => {
+    button.addEventListener('click', async () => {
+      activeRoom = button.dataset.room;
+      document.querySelectorAll('[data-room]').forEach(item => item.setAttribute('aria-pressed', String(item === button)));
+      resetForm();
+      try { await loadRecords(); } catch (error) { setMessage(error.message); }
+    });
+  });
+
+  if (adminToken) {
+    showManager();
+    loadRecords().catch(error => setMessage(error.message));
+  }
+})();
+</script>
+</body>
+</html>
