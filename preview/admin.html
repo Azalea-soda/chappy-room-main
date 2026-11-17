@@ -186,7 +186,7 @@
       actions.append(
         makeButton('修正する', 'secondary', () => beginEdit(record)),
         makeButton('追記する', 'secondary', () => appendRecord(record)),
-        makeButton(record.status === '継続中' ? '終了にする' : '継続中に戻す', 'secondary', () => changeStatus(record)),
+        makeButton('状態を変更する', 'secondary', () => changeStatus(record)),
         makeButton('削除する', 'danger', () => deleteRecord(record))
       );
       card.append(meta, body, actions);
@@ -213,10 +213,21 @@
     } catch (error) { setMessage(error.message); }
   }
   async function changeStatus(record) {
-    const next = record.status === '継続中' ? '終了' : '継続中';
-    if (!window.confirm(record.id + ' を「' + next + '」に変更する？')) return;
+    const choices = ['継続中', '終了', '取り消し'];
+    const currentIndex = choices.indexOf(record.status);
+    const suggested = currentIndex >= 0 ? choices[currentIndex] : '継続中';
+    const next = window.prompt(
+      record.id + ' の状態を入力してね：継続中／終了／取り消し',
+      suggested
+    );
+    if (next === null) return;
+    if (!choices.includes(next.trim())) {
+      setMessage('状態は「継続中」「終了」「取り消し」のどれかを入力してね。');
+      return;
+    }
+    if (!window.confirm(record.id + ' を「' + next.trim() + '」に変更する？')) return;
     try {
-      await api('/admin/records', { action: 'status', room: activeRoom, id: record.id, status: next });
+      await api('/admin/records', { action: 'status', room: activeRoom, id: record.id, status: next.trim() });
       await loadRecords();
     } catch (error) { setMessage(error.message); }
   }
