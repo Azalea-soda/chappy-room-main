@@ -85,7 +85,7 @@
   'use strict';
   // 本番D1への誤接続を防ぐため、テスト専用Workerが用意できるまで接続先は空にする。
   // 接続先を設定する際も、本番Worker URLは絶対に指定しない。
-  const API_URL = '';
+  const API_URL = 'https://chappy-memory-admin-test.nanami-moca.workers.dev';
   const TOKEN_KEY = 'chappy_admin_session';
   const loginPanel = document.getElementById('loginPanel');
   const manager = document.getElementById('manager');
