@@ -20,7 +20,7 @@ Keep the existing record fields `id, category, content, created_at, updated_at` 
 8. Never run write tests against production D1.
 
 ## Current implementation state (2026-11-17)
-- The development Worker is based on the user's supplied 409-line Worker source. Existing device-authenticated app routes, enrollment behavior, Groq GPT-OSS 120B connection, and SSE streaming path have been retained in the draft.
+- The development Worker is based on the user's supplied 409-line Worker source. Existing device-authenticated app routes, enrollment behavior, Groq GPT-OSS 120B connection, and SSE streaming path are present in the draft. However, `worker.js` is not present on repository `main` or the other checked branches, so a line-by-line comparison against a committed baseline is not currently possible. Do not claim full equivalence until the original source is retrieved and compared.
 - The draft adds admin login/logout and allowlisted record operations. It checks the existing `CHAPPY_ADMIN_PASSWORD`, stores only a SHA-256 hash of a random admin token in `admin_sessions`, and gives the token a 30-minute expiry.
 - Admin CORS is restricted to `https://azalea-soda.github.io`; ordinary app API CORS remains separate.
 - Read-only inspection of the live production D1 previously confirmed all three memory tables have the six fields `id, category, content, created_at, updated_at, status`. M and C IDs use `M001...` and `C001...`; fixed-rule IDs use `FR001...` (observed through `FR023`). This information is used only for compatibility planning; no production writes have been made.
@@ -31,7 +31,7 @@ Keep the existing record fields `id, category, content, created_at, updated_at` 
 - The Worker now creates `admin_login_attempts` lazily and limits five failed password attempts from the same client IP within a 15-minute window, followed by a 15-minute block. The lockout SQL was exercised against local SQLite; Cloudflare D1 runtime behavior remains untested.
 - GitHub Actions `node --check worker.js` succeeded for the latest Worker commit. This confirms JavaScript syntax only, not Cloudflare runtime, D1, or complete security.
 - A syntax check is not proof of D1 schema compatibility, runtime behavior, or complete security.
-- The repository contains no authoritative D1 schema definition or migration for the existing M/C/fixed-rules tables. Actual production D1 contents and schema have not been inspected from this environment.
+- The repository contains no authoritative D1 schema definition or migration for the existing M/C/fixed-rules tables. Earlier read-only schema observations were recorded in this plan; no production writes have been made. The original 409-line Worker baseline is not committed in the checked branches.
 
 ## Safety boundary
 - `preview/index.html` points at the existing production Worker and D1. It is not an isolated test environment.
