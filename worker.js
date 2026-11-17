@@ -56,13 +56,15 @@ export default {
       };
 
       const nextId = async (series, prefix) => {
-        const table = series === "mother" ? "mother_memories" : "chappy_profile";
+        const table = series === "mother" ? "mother_memories" :
+          series === "chappy" ? "chappy_profile" : "fixed_rules";
+        const idNumberStart = series === "fixed" ? 3 : 2;
         await env.DB.prepare(
           "CREATE TABLE IF NOT EXISTS id_counters (series TEXT PRIMARY KEY, last_number INTEGER NOT NULL)"
         ).run();
         await env.DB.prepare(
-          "INSERT OR IGNORE INTO id_counters (series, last_number) SELECT ?, COALESCE(MAX(CAST(SUBSTR(id, 2) AS INTEGER)), 0) FROM " +
-          table
+          "INSERT OR IGNORE INTO id_counters (series, last_number) SELECT ?, COALESCE(MAX(CAST(SUBSTR(id, " +
+          idNumberStart + ") AS INTEGER)), 0) FROM " + table
         ).bind(series).run();
         const row = await env.DB.prepare(
           "UPDATE id_counters SET last_number = last_number + 1 WHERE series = ? RETURNING last_number"
@@ -119,7 +121,7 @@ export default {
         const rooms = {
           mother_memories: { table: "mother_memories", series: "mother", prefix: "M" },
           chappy_profile: { table: "chappy_profile", series: "chappy", prefix: "C" },
-          fixed_rules: { table: "fixed_rules", series: null, prefix: "F" },
+          fixed_rules: { table: "fixed_rules", series: "fixed", prefix: "FR" },
         };
         const room = rooms[body.room];
         if (!room) return json({ error: "管理対象が正しくありません" }, 400);
@@ -138,13 +140,7 @@ export default {
             return json({ error: "分類または内容が正しくありません" }, 400);
           }
           let id;
-          if (room.series) {
-            id = await nextId(room.series, room.prefix);
-          } else {
-            return json({
-              error: "固定ルールの番号の付け方を実際の保存データで確認するまで、新規追加は安全のため停止しています"
-            }, 409);
-          }
+          id = await nextId(room.series, room.prefix);
           const timestamp = now();
           await env.DB.prepare(
             "INSERT INTO " + table +
