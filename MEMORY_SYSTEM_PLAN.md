@@ -32,3 +32,37 @@ The existing record shape remains `id, category, content, created_at, updated_at
 3. Add conservative M/C-only memory extraction and save flow, with validation and duplicate/update handling.
 4. Test syntax and logic offline; then plan a separate D1 test binding before any network write test.
 5. Only after the user explicitly approves, deploy the test Worker and test app. Keep production `main` unchanged until all checks pass.
+
+
+## Admin API contract (design; not yet implemented)
+All admin routes are POST endpoints. They must reject requests unless the caller has a valid, unexpired admin session. They must never accept a mother's device token as an admin credential.
+
+### Authentication
+- `POST /admin/login`: accept `{ "password": "..." }`; compare only against the existing Worker secret `CHAPPY_ADMIN_PASSWORD`; on success generate a cryptographically random bearer token, store only its SHA-256 hash in `admin_sessions`, and return the raw token once.
+- Admin token lifetime: 30 minutes. Check expiry and `revoked_at IS NULL` on every admin request.
+- `POST /admin/logout`: revoke the current session in D1; the browser then clears its sessionStorage token.
+- Never log passwords or raw tokens. Never store the raw token in D1, GitHub, or localStorage.
+- Admin routes must validate the exact GitHub Pages Origin `https://azalea-soda.github.io` (and reject missing or other Origins for browser requests). Keep the existing normal app API behavior separate; do not globally break device-authenticated requests.
+
+### Records
+- `POST /admin/records` with `{action:"list", room:"mother_memories"|"chappy_profile"|"fixed_rules"}`: list all records, including inactive statuses, so the owner can review and restore them.
+- `create`: accept `room, category, content`; generate the existing M/C IDs using the existing counter logic. Fixed-rule IDs must be generated using the actual existing fixed_rules schema/ID convention after inspecting it; do not guess.
+- `update`: accept `room, id, category, content`; update category/content and updated_at.
+- `append`: accept `room, id, content`; append with a newline and update updated_at.
+- `status`: accept `room, id, status`; allow only the existing statuses `継続中`, `終了`, `取り消し`.
+- `delete`: accept `room, id`; permanently delete only after the UI's explicit confirmation.
+- Resolve the table only through a hard-coded allowlist. Never interpolate a client-supplied table name.
+- Every action must validate required fields and bounded text lengths, and return consistent JSON errors.
+
+### Browser page follow-ups
+- Keep API_URL empty until a separate test Worker URL is explicitly configured.
+- Add an append action to the record UI (it is currently missing).
+- Make logout call `/admin/logout` before clearing sessionStorage.
+- Show inactive records in the admin list and allow restoring them.
+- Keep the password only in the login input for the duration of login; clear it immediately afterward.
+
+### Test boundary
+- The preview site shares the production origin and currently points at the production Worker for normal app functions. Do not use it for write tests.
+- Create a separate test Worker and separate test D1 binding before any admin write test. Apply `migrations/0001_admin_sessions.sql` only to that test D1 first.
+- Verify the existing D1 table schemas (especially `fixed_rules` and `id_counters`) before implementing fixed-rule create/update/delete or applying any migration.
+- No production Worker deployment, production D1 write/migration, or merge to `main` is authorized by this development work.
