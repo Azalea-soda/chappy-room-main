@@ -261,6 +261,7 @@
     let currentAudio = null;
     let prefetchedAudio = null;
     let currentAIAbortController = null;
+    let currentVoiceAbortController = null;
 
     // --- D1に保存したチャッピーの知識を読み込む ---
     let cachedD1FixedRules = [];
@@ -438,10 +439,17 @@
         }
 
       } else if (currentState === 'processing' || currentState === 'speaking') {
+        const stoppedGeneration = responseGeneration;
         responseGeneration++;
+        const stoppedPipeline = speechPipelineControls.get(stoppedGeneration);
+        if (stoppedPipeline) stoppedPipeline.cancel();
         if (currentAIAbortController) {
           currentAIAbortController.abort();
           currentAIAbortController = null;
+        }
+        if (currentVoiceAbortController) {
+          currentVoiceAbortController.abort();
+          currentVoiceAbortController = null;
         }
         clearTimeout(finishTimer);
         finishTimer = null;
@@ -623,14 +631,262 @@
       return reply;
     }
 
+    // --- ストリーミング返答専用の音声キュー ---
+    const speechPipelineControls = new Map();
+
+    function splitSpeechBuffer(buffer, flush = false) {
+      const chunks = [];
+      let rest = buffer;
+      while (rest) {
+        // 「、」が短すぎるときは、その先の「。」なども探す。
+        const punctuationPattern = /[、。！？!?]/g;
+        let punctuation;
+        let chosenEnd = -1;
+        while ((punctuation = punctuationPattern.exec(rest)) !== null) {
+          const candidate = rest.slice(0, punctuation.index + 1).trim();
+          if (/[。！？!?]/.test(punctuation[0]) || candidate.length >= 12) {
+            chosenEnd = punctuation.index + 1;
+            break;
+          }
+        }
+        if (chosenEnd > 0) {
+          chunks.push(rest.slice(0, chosenEnd).trim());
+          rest = rest.slice(chosenEnd).trimStart();
+          continue;
+        }
+
+        // 句読点が届かなくても、自然な語尾が見つかった場合だけ先に区切る。
+        if (rest.length >= 28) {
+          const limit = Math.min(rest.length, 34);
+          const endings = /(けれども|けれど|けど|ので|のに|だから|ですが|たら|なら|ても|てから|ながら|ですね|ですよ|ます|です|だよ|だね|かな)$/;
+          let bestCut = -1;
+          for (let cut = 18; cut <= limit; cut++) {
+            if (endings.test(rest.slice(0, cut).trimEnd())) bestCut = cut;
+          }
+          if (bestCut > 0) {
+            chunks.push(rest.slice(0, bestCut).trim());
+            rest = rest.slice(bestCut).trimStart();
+            continue;
+          }
+        }
+        break;
+      }
+      if (flush && rest.trim()) chunks.push(rest.trim());
+      return { chunks: chunks.filter(Boolean), rest: flush ? '' : rest };
+    }
+
+    function queueSpeechChunk(generation, text) {
+      const control = speechPipelineControls.get(generation);
+      if (control) control.enqueue(text);
+    }
+
+    async function speakChappyStream(generation) {
+      const textQueue = [];
+      const audioQueue = [];
+      let textFinished = false;
+      let synthesisFinished = false;
+      let cancelled = false;
+      let wakeSynthesis = null;
+      let wakePlayback = null;
+
+      const notifySynthesis = () => {
+        if (wakeSynthesis) {
+          const wake = wakeSynthesis;
+          wakeSynthesis = null;
+          wake();
+        }
+      };
+      const notifyPlayback = () => {
+        if (wakePlayback) {
+          const wake = wakePlayback;
+          wakePlayback = null;
+          wake();
+        }
+      };
+      const enqueue = (text) => {
+        const clean = removeEmojis(text).trim();
+        if (!clean || cancelled || generation !== responseGeneration) return;
+        textQueue.push(clean);
+        notifySynthesis();
+      };
+      const finishText = () => {
+        textFinished = true;
+        notifySynthesis();
+      };
+      const cancel = () => {
+        cancelled = true;
+        textFinished = true;
+        if (currentVoiceAbortController) currentVoiceAbortController.abort();
+        if (currentAudio) currentAudio.pause();
+        if (prefetchedAudio) {
+          prefetchedAudio.pause();
+          prefetchedAudio.removeAttribute('src');
+          prefetchedAudio.load();
+          prefetchedAudio = null;
+        }
+        notifySynthesis();
+        notifyPlayback();
+      };
+
+      speechPipelineControls.set(generation, { enqueue, finishText, cancel });
+
+      const synthesisWorker = (async () => {
+        while (!cancelled && generation === responseGeneration) {
+          if (!textQueue.length) {
+            if (textFinished) break;
+            await new Promise(resolve => { wakeSynthesis = resolve; });
+            continue;
+          }
+
+          // VOICEVOXへの生成リクエストは常に1件ずつ。再生待ち音声も最大1件。
+          while (audioQueue.length >= 1 && !cancelled && generation === responseGeneration) {
+            await new Promise(resolve => { wakeSynthesis = resolve; });
+          }
+          if (cancelled || generation !== responseGeneration) break;
+
+          const speechText = textQueue.shift();
+          const controller = new AbortController();
+          currentVoiceAbortController = controller;
+          try {
+            const startedAt = performance.now();
+            const response = await fetch(VOICE_WORKER_URL, {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({ text: speechText }),
+              signal: controller.signal
+            });
+            if (cancelled || generation !== responseGeneration) break;
+            if (!response.ok) {
+              const detail = await response.text();
+              throw new Error('[Voice Worker Error ' + response.status + ']: ' + detail);
+            }
+            const data = await response.json();
+            if (cancelled || generation !== responseGeneration) break;
+            if (!data.success || !data.audioUrl) {
+              throw new Error(data.error || '音声URLを取得できませんでした');
+            }
+
+            const audio = new Audio(data.audioUrl);
+            audio.preload = 'auto';
+            audio.load();
+            audioQueue.push({ audio, startedAt });
+            if (!prefetchedAudio) prefetchedAudio = audio;
+            notifyPlayback();
+          } catch (error) {
+            if (generation === responseGeneration && error.name !== 'AbortError') {
+              cancelled = true;
+              textFinished = true;
+              // 次の音声生成に失敗したら、再生中・待機中の音声も止めて後片付けする。
+              if (currentAudio) currentAudio.pause();
+              if (prefetchedAudio) {
+                prefetchedAudio.pause();
+                prefetchedAudio.removeAttribute('src');
+                prefetchedAudio.load();
+                prefetchedAudio = null;
+              }
+              notifySynthesis();
+              notifyPlayback();
+              throw error;
+            }
+          } finally {
+            if (currentVoiceAbortController === controller) currentVoiceAbortController = null;
+          }
+        }
+        synthesisFinished = true;
+        notifyPlayback();
+      })();
+
+      const playbackWorker = (async () => {
+        while (!cancelled && generation === responseGeneration) {
+          if (!audioQueue.length) {
+            if (synthesisFinished && textFinished && !textQueue.length) break;
+            await new Promise(resolve => { wakePlayback = resolve; });
+            continue;
+          }
+
+          const item = audioQueue.shift();
+          const audio = item.audio;
+          if (prefetchedAudio === audio) prefetchedAudio = null;
+          notifySynthesis();
+          if (generation !== responseGeneration) break;
+
+          currentAudio = audio;
+          await new Promise((resolve, reject) => {
+            let settled = false;
+            const finish = () => {
+              if (settled) return;
+              settled = true;
+              resolve();
+            };
+            const failPlayback = (error) => {
+              if (settled) return;
+              settled = true;
+              cancelled = true;
+              textFinished = true;
+              if (currentVoiceAbortController) currentVoiceAbortController.abort();
+              if (prefetchedAudio && prefetchedAudio !== audio) {
+                prefetchedAudio.pause();
+                prefetchedAudio.removeAttribute('src');
+                prefetchedAudio.load();
+                prefetchedAudio = null;
+              }
+              notifySynthesis();
+              notifyPlayback();
+              reject(error);
+            };
+            audio.onended = finish;
+            audio.onpause = () => {
+              if (cancelled || generation !== responseGeneration) {
+                finish();
+              } else {
+                failPlayback(new Error('音声が予期せず一時停止しました'));
+              }
+            };
+            audio.onerror = () => {
+              console.error('音声再生エラー:', audio.error || 'unknown');
+              failPlayback(new Error('音声を再生できませんでした'));
+            };
+            audio.onplaying = () => {
+              const playingAt = performance.now();
+              console.log('[音声計測] 実際の再生開始');
+              console.log('[計測] 音声URL取得から再生開始まで: ' + Math.round(playingAt - item.startedAt) + 'ms');
+            };
+            const result = audio.play();
+            if (result && typeof result.catch === 'function') {
+              result.catch(error => {
+                if (generation === responseGeneration) console.error('音声再生開始エラー:', error);
+                failPlayback(error);
+              });
+            }
+          });
+          if (currentAudio === audio) currentAudio = null;
+          if (generation !== responseGeneration) break;
+        }
+      })();
+
+      try {
+        // 片方が失敗しても、もう片方の終了を待ってから後片付けする。
+        const results = await Promise.allSettled([synthesisWorker, playbackWorker]);
+        const failed = results.find(result => result.status === 'rejected');
+        if (failed) throw failed.reason;
+      } finally {
+        speechPipelineControls.delete(generation);
+        if (generation === responseGeneration) {
+          if (currentAudio) currentAudio = null;
+          if (prefetchedAudio) prefetchedAudio = null;
+        }
+      }
+    }
+
     async function getChappyResponse(userText) {
       const requestGeneration = responseGeneration;
+      let voicePipelineResult = null;
       try {
         await loadChappyKnowledge();
         if (requestGeneration !== responseGeneration) return;
 
         const systemPrompt = buildChappySystemPrompt();
-        const promptText = `${systemPrompt}\n\nお母さんの言葉：「${userText}」\n\nチャッピーとしての返事：`;
+        const promptText = systemPrompt + '\n\nお母さんの言葉：「' + userText + '」\n\nチャッピーとしての返事：';
 
         currentAIAbortController = new AbortController();
         currentState = 'speaking';
@@ -640,19 +896,16 @@
         let accumulatedText = '';
         let speechBuffer = '';
         let firstTextAt = 0;
-        let speechChain = Promise.resolve();
-
-        const enqueueSpeech = (sentence) => {
-          const speechText = sentence.trim();
-          if (!speechText) return;
-          speechChain = speechChain.then(() => new Promise((resolve) => {
-            if (requestGeneration !== responseGeneration) {
-              resolve();
-              return;
+        // 音声側の失敗をすぐ捕まえ、AIの文章生成も早めに中断する。
+        voicePipelineResult = speakChappyStream(requestGeneration).then(
+          () => ({ ok: true }),
+          error => {
+            if (requestGeneration === responseGeneration && currentAIAbortController) {
+              currentAIAbortController.abort();
             }
-            speakChappyVoice(speechText, resolve, firstTextAt || performance.now());
-          }));
-        };
+            return { ok: false, error };
+          }
+        );
 
         await requestChappyAI(promptText, (delta) => {
           if (requestGeneration !== responseGeneration) return;
@@ -663,29 +916,28 @@
           scrollToBottom();
 
           speechBuffer += delta;
-          const completedSentences = speechBuffer.match(/[^。！？!?]+[。！？!?]+/g) || [];
-          if (completedSentences.length > 0) {
-            completedSentences.forEach(enqueueSpeech);
-            const spokenLength = completedSentences.join('').length;
-            speechBuffer = speechBuffer.slice(spokenLength);
-          }
+          const split = splitSpeechBuffer(speechBuffer, false);
+          split.chunks.forEach(chunk => queueSpeechChunk(requestGeneration, chunk));
+          speechBuffer = split.rest;
         });
 
         if (requestGeneration !== responseGeneration) return;
         currentAIAbortController = null;
 
         if (speechBuffer.trim()) {
-          enqueueSpeech(speechBuffer);
+          const finalSplit = splitSpeechBuffer(speechBuffer, true);
+          finalSplit.chunks.forEach(chunk => queueSpeechChunk(requestGeneration, chunk));
           speechBuffer = '';
         }
 
-        if (!accumulatedText.trim()) {
-          throw new Error('チャッピーの返答テキストが空でした');
-        }
+        if (!accumulatedText.trim()) throw new Error('チャッピーの返答テキストが空でした');
 
         incrementCount();
         console.log('[計測] ストリーミング返答の全文受信');
-        await speechChain;
+        const control = speechPipelineControls.get(requestGeneration);
+        if (control) control.finishText();
+        const voiceResult = await voicePipelineResult;
+        if (!voiceResult.ok) throw voiceResult.error;
 
         if (requestGeneration !== responseGeneration) return;
         currentState = 'idle';
@@ -693,8 +945,16 @@
 
       } catch (error) {
         if (requestGeneration !== responseGeneration) return;
+        const failedPipeline = speechPipelineControls.get(requestGeneration);
+        if (failedPipeline) failedPipeline.cancel();
         currentAIAbortController = null;
-        console.error('チャッピー応答エラー:', error);
+        if (currentVoiceAbortController) {
+          currentVoiceAbortController.abort();
+          currentVoiceAbortController = null;
+        }
+        const voiceResult = voicePipelineResult ? await voicePipelineResult : null;
+        const responseError = voiceResult && !voiceResult.ok ? voiceResult.error : error;
+        console.error('チャッピー応答エラー:', responseError);
 
         responseGeneration++;
         const errorGeneration = responseGeneration;
@@ -709,13 +969,10 @@
           prefetchedAudio.load();
           prefetchedAudio = null;
         }
-        if ('speechSynthesis' in window) {
-          window.speechSynthesis.cancel();
-        }
+        if ('speechSynthesis' in window) window.speechSynthesis.cancel();
 
-        const friendlyMessage = `ごめんにゃ！エラーが出たにゃ（詳細: ${error.message}）`;
+        const friendlyMessage = 'ごめんにゃ！エラーが出たにゃ（詳細: ' + responseError.message + '）';
         addChappyBubble(friendlyMessage);
-
         currentState = 'speaking';
         setButtonState('speaking');
         speakChappyVoice(friendlyMessage, () => {
