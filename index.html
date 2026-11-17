@@ -439,7 +439,10 @@
         }
 
       } else if (currentState === 'processing' || currentState === 'speaking') {
+        const stoppedGeneration = responseGeneration;
         responseGeneration++;
+        const stoppedPipeline = speechPipelineControls.get(stoppedGeneration);
+        if (stoppedPipeline) stoppedPipeline.cancel();
         if (currentAIAbortController) {
           currentAIAbortController.abort();
           currentAIAbortController = null;
@@ -676,6 +679,7 @@
       const audioQueue = [];
       let textFinished = false;
       let synthesisFinished = false;
+      let cancelled = false;
       let wakeSynthesis = null;
       let wakePlayback = null;
 
@@ -703,11 +707,25 @@
         textFinished = true;
         notifySynthesis();
       };
+      const cancel = () => {
+        cancelled = true;
+        textFinished = true;
+        if (currentVoiceAbortController) currentVoiceAbortController.abort();
+        if (currentAudio) currentAudio.pause();
+        if (prefetchedAudio) {
+          prefetchedAudio.pause();
+          prefetchedAudio.removeAttribute('src');
+          prefetchedAudio.load();
+          prefetchedAudio = null;
+        }
+        notifySynthesis();
+        notifyPlayback();
+      };
 
-      speechPipelineControls.set(generation, { enqueue, finishText });
+      speechPipelineControls.set(generation, { enqueue, finishText, cancel });
 
       const synthesisWorker = (async () => {
-        while (generation === responseGeneration) {
+        while (!cancelled && generation === responseGeneration) {
           if (!textQueue.length) {
             if (textFinished) break;
             await new Promise(resolve => { wakeSynthesis = resolve; });
@@ -715,10 +733,10 @@
           }
 
           // VOICEVOXへの生成リクエストは常に1件ずつ。再生待ち音声も最大1件。
-          while (audioQueue.length >= 1 && generation === responseGeneration) {
+          while (audioQueue.length >= 1 && !cancelled && generation === responseGeneration) {
             await new Promise(resolve => { wakeSynthesis = resolve; });
           }
-          if (generation !== responseGeneration) break;
+          if (cancelled || generation !== responseGeneration) break;
 
           const speechText = textQueue.shift();
           const controller = new AbortController();
@@ -731,7 +749,7 @@
               body: JSON.stringify({ text: speechText }),
               signal: controller.signal
             });
-            if (generation !== responseGeneration) break;
+            if (cancelled || generation !== responseGeneration) break;
             if (!response.ok) {
               const detail = await response.text();
               throw new Error('[Voice Worker Error ' + response.status + ']: ' + detail);
@@ -783,6 +801,7 @@
               resolve();
             };
             audio.onended = finish;
+            audio.onpause = finish;
             audio.onerror = () => {
               console.error('音声再生エラー:', audio.error || 'unknown');
               finish();
