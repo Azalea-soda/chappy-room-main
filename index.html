@@ -761,7 +761,7 @@
               throw new Error('[Voice Worker Error ' + response.status + ']: ' + detail);
             }
             const data = await response.json();
-            if (generation !== responseGeneration) break;
+            if (cancelled || generation !== responseGeneration) break;
             if (!data.success || !data.audioUrl) {
               throw new Error(data.error || '音声URLを取得できませんでした');
             }
@@ -835,7 +835,10 @@
       })();
 
       try {
-        await Promise.all([synthesisWorker, playbackWorker]);
+        // 片方が失敗しても、もう片方の終了を待ってから後片付けする。
+        const results = await Promise.allSettled([synthesisWorker, playbackWorker]);
+        const failed = results.find(result => result.status === 'rejected');
+        if (failed) throw failed.reason;
       } finally {
         speechPipelineControls.delete(generation);
         if (generation === responseGeneration) {
