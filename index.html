@@ -705,7 +705,7 @@
       };
       const enqueue = (text) => {
         const clean = removeEmojis(text).trim();
-        if (!clean || generation !== responseGeneration) return;
+        if (!clean || cancelled || generation !== responseGeneration) return;
         textQueue.push(clean);
         notifySynthesis();
       };
