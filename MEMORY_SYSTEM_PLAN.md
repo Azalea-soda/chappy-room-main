@@ -1,80 +1,71 @@
 # Chappy memory system v1 — implementation notes
 
-This branch is isolated from `main`. Nothing in this branch is deployed to the production Worker or merged into the production app.
+This work is isolated on branch `memory-admin-v1`. Nothing here is deployed to the production Worker or merged into `main`.
 
 ## Canonical data stores
 - `mother_memories` (M): mother's feelings, opinions, meaningful memories, preferences and ongoing interests.
 - `chappy_profile` (C): Chappy's own likes, experiences and developing profile.
 - `fixed_rules`: identity, tone, promises and absolute behavior rules. These are curated by the administrator only and are never auto-generated from ordinary conversation.
 
-The existing record shape remains `id, category, content, created_at, updated_at`, with the already-used `status` field retained. Do not add importance or frequency scores.
+Keep the existing record fields `id, category, content, created_at, updated_at` and existing `status`. Do not add importance or frequency scores.
 
-## Required behavior
-1. Conversation memory collection may propose/save only clear, useful M or C facts. It must not write fixed rules.
+## Required memory behavior
+1. Conversation memory collection may save only clear, useful M or C facts. It must never write fixed rules.
 2. Do not save guesses, transient small talk, sensitive details, passwords, or full conversation transcripts.
-3. Preserve corrections: a clear correction should update the relevant existing memory, retaining the correction/history in the content when appropriate rather than silently losing the old context.
-4. Avoid duplicates. If the classification or whether something is worth remembering is uncertain, do not save it automatically.
-5. The administrator must be able to view, add, edit, append, deactivate/reactivate, and delete records in all three rooms after the app has been handed to the mother.
+3. Preserve corrections: update the relevant existing memory and retain correction/history where appropriate rather than silently losing important context.
+4. Avoid duplicates. If classification or usefulness is uncertain, do not save automatically.
+5. After handover, the owner must be able to remotely view, add, edit/correct, append, deactivate/reactivate, and delete records in all three stores.
 6. Reuse the existing `CHAPPY_ADMIN_PASSWORD` secret. Do not introduce another password and never put the password in frontend code or GitHub.
-7. The mother's device token and administrator session are separate credentials. The admin session is short-lived and stored only in sessionStorage.
-8. Never run write tests against production D1. The preview currently calls the same production Worker/D1 as the live app, so it is not a safe isolated write-test environment.
+7. Mother's device token and administrator session are separate credentials. Admin sessions are short-lived; the browser stores the token only in `sessionStorage`.
+8. Never run write tests against production D1.
 
-## Current implementation state
-- Existing Worker pasted by the developer supports device-authenticated list/create/status/append for M and C, and list-only for fixed rules.
-- Existing preview frontend reads all three D1 tables but does not save conversation memories.
-- `preview/admin.html` now includes add, edit, append, status, delete, login, and logout UI flows. Its API URL remains intentionally empty until a separate test Worker is ready.
-- `worker.js` has been added on this development branch based on the 409-line Worker source supplied by the user. It includes separate admin login/session validation and allowlisted admin record operations while retaining the existing device-authenticated app routes and Groq streaming path.
-- The admin Worker draft must not be deployed yet. The `fixed_rules` ID convention and exact D1 schema have not been verified; the current draft uses a provisional UUID-style `F-` ID for new fixed rules.
-- No Worker deployment, D1 migration, production write, or merge to main is authorized by this branch work.
-- Before any live test, establish a separate test D1 database and bind it only to the test Worker, or provide another verified isolation boundary.
+## Current implementation state (2026-11-17)
+- The development Worker is based on the user's supplied 409-line Worker source. Existing device-authenticated app routes, enrollment behavior, Groq GPT-OSS 120B connection, and SSE streaming path have been retained in the draft.
+- The draft adds admin login/logout and allowlisted record operations. It checks the existing `CHAPPY_ADMIN_PASSWORD`, stores only a SHA-256 hash of a random admin token in `admin_sessions`, and gives the token a 30-minute expiry.
+- Admin CORS is restricted to `https://azalea-soda.github.io`; ordinary app API CORS remains separate.
+- Admin M and C operations include list, create, edit, append, status change, and delete. Fixed rules currently support list, edit, append, status change, and delete. Fixed-rule creation deliberately returns HTTP 409 until the real ID convention is verified; do not guess an ID.
+- `preview/admin.html` has login/logout, M/C/fixed-rule tabs, list, add/edit, append, status change, and delete controls. Its `API_URL` is intentionally empty, so it cannot contact any Worker yet.
+- The current status button toggles between `継続中` and `終了`; direct selection of `取り消し` is not yet exposed in the page.
+- `migrations/0001_admin_sessions.sql` exists but has not been applied to any database.
+- The latest Worker change (commit `3e83934a9920b658c9a7d37ccea30e3c571b3654`) blocks fixed-rule creation pending ID verification. Its GitHub Actions `node --check worker.js` run succeeded.
+- A syntax check is not proof of D1 schema compatibility, runtime behavior, or complete security.
+- The repository contains no authoritative D1 schema definition or migration for the existing M/C/fixed-rules tables. Actual production D1 contents and schema have not been inspected from this environment.
+
+## Safety boundary
+- `preview/index.html` points at the existing production Worker and D1. It is not an isolated test environment.
+- Do not connect `preview/admin.html` to the production Worker and do not perform production writes or migrations.
+- Before runtime testing, create a separate test D1 database and a separate test Worker bound only to that database. Apply `migrations/0001_admin_sessions.sql` only to the test D1.
+- Fail closed if the test database binding or required tables are missing. Never silently fall back to production.
+- No production Worker deployment, production D1 write/migration, or merge to `main` is authorized by this work.
 
 ## Next steps
-1. Add and review admin-only Worker routes with hashed, expiring sessions issued after checking the existing admin password.
-2. Add admin CRUD for M, C, and fixed rules using an allowlist of table names.
-3. Add conservative M/C-only memory extraction and save flow, with validation and duplicate/update handling.
-4. Test syntax and logic offline; then plan a separate D1 test binding before any network write test.
-5. Only after the user explicitly approves, deploy the test Worker and test app. Keep production `main` unchanged until all checks pass.
+1. Obtain read-only confirmation of the existing D1 schemas and sample IDs, especially `fixed_rules`, `id_counters`, `mother_memories`, and `chappy_profile`. This must be done without modifying data.
+2. Correct any assumptions in the admin Worker from the actual schema. In particular, implement fixed-rule ID generation only after its real convention is known.
+3. Finish the admin UI status controls so the owner can explicitly choose `継続中`, `終了`, or `取り消し`, and clearly explain that fixed-rule creation is temporarily unavailable.
+4. Review admin authentication protections, including failed-login abuse protection, token expiry/revocation, origin checks, and secret handling.
+5. Build and bind a separate test Worker/D1. Test only against that isolated environment, including schema migration and CRUD.
+6. Design conservative M/C-only memory extraction and save flow after admin CRUD is stable. Fixed rules must remain owner-curated.
+7. Compare the final Worker against the supplied baseline and review all changes before requesting approval for any test deployment. Keep production `main` unchanged unless the user explicitly approves otherwise.
 
-
-## Admin API contract (design; not yet implemented)
-All admin routes are POST endpoints. They must reject requests unless the caller has a valid, unexpired admin session. They must never accept a mother's device token as an admin credential.
+## Admin API design
+All admin endpoints are POST and require the separate, valid, unexpired admin session except login.
 
 ### Authentication
-- `POST /admin/login`: accept `{ "password": "..." }`; compare only against the existing Worker secret `CHAPPY_ADMIN_PASSWORD`; on success generate a cryptographically random bearer token, store only its SHA-256 hash in `admin_sessions`, and return the raw token once.
-- Admin token lifetime: 30 minutes. Check expiry and `revoked_at IS NULL` on every admin request.
-- `POST /admin/logout`: revoke the current session in D1; the browser then clears its sessionStorage token.
-- Never log passwords or raw tokens. Never store the raw token in D1, GitHub, or localStorage.
-- Admin routes must validate the exact GitHub Pages Origin `https://azalea-soda.github.io` (and reject missing or other Origins for browser requests). Keep the existing normal app API behavior separate; do not globally break device-authenticated requests.
+- `POST /admin/login`: accepts `{ "password": "..." }`; checks only the existing Worker secret `CHAPPY_ADMIN_PASSWORD`; on success creates a cryptographically random bearer token, stores only its SHA-256 hash in `admin_sessions`, and returns the raw token once.
+- Token lifetime is 30 minutes. Every admin request checks expiry and `revoked_at IS NULL`.
+- `POST /admin/logout`: revokes the current session; browser clears its `sessionStorage` token.
+- Never log passwords or raw tokens. Never store the raw token in D1, GitHub, or `localStorage`.
+- Admin routes require the exact GitHub Pages Origin `https://azalea-soda.github.io`. Keep normal device-authenticated app API behavior separate.
 
-### Records
-- `POST /admin/records` with `{action:"list", room:"mother_memories"|"chappy_profile"|"fixed_rules"}`: list all records, including inactive statuses, so the owner can review and restore them.
-- `create`: accept `room, category, content`; generate the existing M/C IDs using the existing counter logic. Fixed-rule IDs must be generated using the actual existing fixed_rules schema/ID convention after inspecting it; do not guess.
-- `update`: accept `room, id, category, content`; update category/content and updated_at.
-- `append`: accept `room, id, content`; append with a newline and update updated_at.
-- `status`: accept `room, id, status`; allow only the existing statuses `継続中`, `終了`, `取り消し`.
-- `delete`: accept `room, id`; permanently delete only after the UI's explicit confirmation.
-- Resolve the table only through a hard-coded allowlist. Never interpolate a client-supplied table name.
-- Every action must validate required fields and bounded text lengths, and return consistent JSON errors.
+### Record operations
+- `POST /admin/records` with `{action:"list", room:"mother_memories"|"chappy_profile"|"fixed_rules"}`: lists all records, including inactive statuses.
+- `create`: accepts room/category/content. M/C use the existing ID counter logic. Fixed-rule IDs must use the verified real convention; currently blocked.
+- `update`: accepts room/id/category/content and updates `updated_at`.
+- `append`: accepts room/id/content and appends with a newline.
+- `status`: accepts room/id/status; only `継続中`, `終了`, and `取り消し` are allowed.
+- `delete`: accepts room/id; the UI must require explicit confirmation.
+- Resolve table names only through a hard-coded allowlist. Never interpolate a client-supplied table name.
+- Validate required fields and bounded text lengths for every action.
 
-### Browser page follow-ups
-- Keep API_URL empty until a separate test Worker URL is explicitly configured.
-- Add an append action to the record UI (it is currently missing).
-- Make logout call `/admin/logout` before clearing sessionStorage.
-- Show inactive records in the admin list and allow restoring them.
-- Keep the password only in the login input for the duration of login; clear it immediately afterward.
-
-### Test boundary
-- The preview site shares the production origin and currently points at the production Worker for normal app functions. Do not use it for write tests.
-- Create a separate test Worker and separate test D1 binding before any admin write test. Apply `migrations/0001_admin_sessions.sql` only to that test D1 first.
-- Verify the existing D1 table schemas (especially `fixed_rules` and `id_counters`) before implementing fixed-rule create/update/delete or applying any migration.
-- No production Worker deployment, production D1 write/migration, or merge to `main` is authorized by this development work.
-
-
-## Latest code review notes
-- The shared M/C ID generator is defined before the admin route handler so the admin create action can call it safely.
-- The admin browser page sends logout to the Worker to revoke the session, and now exposes an append action.
-- A GitHub Actions workflow runs `node --check worker.js` on changes to this branch.
-- Do not treat a passing syntax check as proof of D1 compatibility or security. Runtime tests require an isolated Worker and isolated D1 database.
-- Before testing, inspect the actual `fixed_rules` schema and existing ID values. Replace the provisional fixed-rule ID generator if the table uses another convention.
-- Admin CORS currently checks the GitHub Pages origin on admin POST routes; verify the actual published admin page origin and ensure preflight behavior matches it before test deployment.
-- The user-supplied source is the reference for preserving existing app behavior. Compare the final Worker diff against it before any deployment.
+## Test-only migration
+`migrations/0001_admin_sessions.sql` creates the admin session table and indexes. Apply it only to the isolated TEST D1 database, never production without separate explicit approval.
