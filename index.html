@@ -834,11 +834,14 @@
         }
       })();
 
-      await Promise.all([synthesisWorker, playbackWorker]);
-      speechPipelineControls.delete(generation);
-      if (generation === responseGeneration) {
-        if (currentAudio) currentAudio = null;
-        if (prefetchedAudio) prefetchedAudio = null;
+      try {
+        await Promise.all([synthesisWorker, playbackWorker]);
+      } finally {
+        speechPipelineControls.delete(generation);
+        if (generation === responseGeneration) {
+          if (currentAudio) currentAudio = null;
+          if (prefetchedAudio) prefetchedAudio = null;
+        }
       }
     }
 
