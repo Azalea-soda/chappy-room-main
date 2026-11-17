@@ -141,7 +141,9 @@ export default {
           if (room.series) {
             id = await nextId(room.series, room.prefix);
           } else {
-            id = "F-" + crypto.randomUUID();
+            return json({
+              error: "固定ルールの番号の付け方を実際の保存データで確認するまで、新規追加は安全のため停止しています"
+            }, 409);
           }
           const timestamp = now();
           await env.DB.prepare(
