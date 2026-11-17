@@ -23,9 +23,9 @@ Keep the existing record fields `id, category, content, created_at, updated_at` 
 - The development Worker is based on the user's supplied 409-line Worker source. Existing device-authenticated app routes, enrollment behavior, Groq GPT-OSS 120B connection, and SSE streaming path have been retained in the draft.
 - The draft adds admin login/logout and allowlisted record operations. It checks the existing `CHAPPY_ADMIN_PASSWORD`, stores only a SHA-256 hash of a random admin token in `admin_sessions`, and gives the token a 30-minute expiry.
 - Admin CORS is restricted to `https://azalea-soda.github.io`; ordinary app API CORS remains separate.
-- Admin M and C operations include list, create, edit, append, status change, and delete. Fixed rules currently support list, edit, append, status change, and delete. Fixed-rule creation deliberately returns HTTP 409 until the real ID convention is verified; do not guess an ID.
+- Read-only inspection of the live D1 confirmed all three tables have the six fields `id, category, content, created_at, updated_at, status`. M and C IDs use `M001...` and `C001...`; fixed-rule IDs use `FR001...` (observed through `FR023`). Fixed-rule creation can therefore use the same counter approach with a three-character prefix offset.
 - `preview/admin.html` has login/logout, M/C/fixed-rule tabs, list, add/edit, append, status change, and delete controls. Its `API_URL` is intentionally empty, so it cannot contact any Worker yet.
-- The current status button toggles between `継続中` and `終了`; direct selection of `取り消し` is not yet exposed in the page.
+- The status control is being expanded to accept all three allowed values: `継続中`, `終了`, and `取り消し`.
 - `migrations/0001_admin_sessions.sql` exists but has not been applied to any database.
 - The latest Worker change (commit `3e83934a9920b658c9a7d37ccea30e3c571b3654`) blocks fixed-rule creation pending ID verification. Its GitHub Actions `node --check worker.js` run succeeded.
 - A syntax check is not proof of D1 schema compatibility, runtime behavior, or complete security.
@@ -39,9 +39,8 @@ Keep the existing record fields `id, category, content, created_at, updated_at` 
 - No production Worker deployment, production D1 write/migration, or merge to `main` is authorized by this work.
 
 ## Next steps
-1. Obtain read-only confirmation of the existing D1 schemas and sample IDs, especially `fixed_rules`, `id_counters`, `mother_memories`, and `chappy_profile`. This must be done without modifying data.
-2. Correct any assumptions in the admin Worker from the actual schema. In particular, implement fixed-rule ID generation only after its real convention is known.
-3. Finish the admin UI status controls so the owner can explicitly choose `継続中`, `終了`, or `取り消し`, and clearly explain that fixed-rule creation is temporarily unavailable.
+1. Read-only confirmation of the live D1 schemas and sample IDs is complete for M, C, and fixed rules. The table list did not show an `id_counters` table; the Worker creates it lazily when the first M/C/fixed record is added.
+2. Update the development Worker to generate fixed-rule IDs as `FR001...` using the verified three-character prefix, and expose all three status values in the admin page.
 4. Review admin authentication protections, including failed-login abuse protection, token expiry/revocation, origin checks, and secret handling.
 5. Build and bind a separate test Worker/D1. Test only against that isolated environment, including schema migration and CRUD.
 6. Design conservative M/C-only memory extraction and save flow after admin CRUD is stable. Fixed rules must remain owner-curated.
