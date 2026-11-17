@@ -55,6 +55,47 @@ export default {
         return btoa(binary).replace(/\+/g, "-").replace(/\//g, "_").replace(/=/g, "");
       };
 
+      // Limit failed password attempts per Cloudflare client IP.
+      const checkAdminPassword = async (password) => {
+        await env.DB.prepare(
+          "CREATE TABLE IF NOT EXISTS admin_login_attempts (ip_hash TEXT PRIMARY KEY, window_started_at TEXT NOT NULL, attempts INTEGER NOT NULL, blocked_until TEXT)"
+        ).run();
+        const ip = request.headers.get("CF-Connecting-IP") || "unknown";
+        const ipHash = await hashToken("admin-login:" + ip);
+        const timestamp = now();
+        const cutoff = new Date(Date.now() - 15 * 60 * 1000).toISOString();
+        const blocked = await env.DB.prepare(
+          "SELECT blocked_until FROM admin_login_attempts WHERE ip_hash = ? AND blocked_until > ?"
+        ).bind(ipHash, timestamp).first();
+        if (blocked) return { ok: false, limited: true };
+
+        const supplied = typeof password === "string" ? password : "";
+        const expected = env.CHAPPY_ADMIN_PASSWORD;
+        const suppliedHash = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(supplied));
+        const expectedHash = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(expected));
+        const a = new Uint8Array(suppliedHash);
+        const b = new Uint8Array(expectedHash);
+        let difference = 0;
+        for (let i = 0; i < a.length; i++) difference |= a[i] ^ b[i];
+        if (difference === 0 && typeof password === "string") {
+          await env.DB.prepare("DELETE FROM admin_login_attempts WHERE ip_hash = ?").bind(ipHash).run();
+          return { ok: true, limited: false };
+        }
+
+        const blockedUntil = new Date(Date.now() + 15 * 60 * 1000).toISOString();
+        await env.DB.prepare(
+          "INSERT INTO admin_login_attempts (ip_hash, window_started_at, attempts, blocked_until) VALUES (?, ?, 1, NULL) " +
+          "ON CONFLICT(ip_hash) DO UPDATE SET " +
+          "attempts = CASE WHEN window_started_at <= ? THEN 1 ELSE attempts + 1 END, " +
+          "blocked_until = CASE WHEN window_started_at <= ? THEN NULL WHEN attempts + 1 >= 5 THEN ? ELSE blocked_until END, " +
+          "window_started_at = CASE WHEN window_started_at <= ? THEN ? ELSE window_started_at END"
+        ).bind(ipHash, timestamp, cutoff, cutoff, blockedUntil, cutoff, timestamp).run();
+        const status = await env.DB.prepare(
+          "SELECT attempts, blocked_until FROM admin_login_attempts WHERE ip_hash = ?"
+        ).bind(ipHash).first();
+        return { ok: false, limited: !!status?.blocked_until && status.blocked_until > timestamp };
+      };
+
       const nextId = async (series, prefix) => {
         const table = series === "mother" ? "mother_memories" :
           series === "chappy" ? "chappy_profile" : "fixed_rules";
@@ -78,9 +119,13 @@ export default {
         if (!env.CHAPPY_ADMIN_PASSWORD) {
           return json({ error: "管理者パスワードが未設定です" }, 500);
         }
-        if (typeof body.password !== "string" ||
-            body.password !== env.CHAPPY_ADMIN_PASSWORD) {
-          return json({ error: "管理者パスワードが違います" }, 401);
+        const passwordCheck = await checkAdminPassword(body.password);
+        if (!passwordCheck.ok) {
+          return json({
+            error: passwordCheck.limited
+              ? "入力回数が上限に達しました。15分後にもう一度お試しください"
+              : "管理者パスワードが違います",
+          }, passwordCheck.limited ? 429 : 401);
         }
         const token = createToken();
         const timestamp = now();
@@ -211,9 +256,13 @@ export default {
         if (!env.CHAPPY_ADMIN_PASSWORD) {
           return json({ error: "管理者パスワードが未設定です" }, 500);
         }
-        if (typeof body.password !== "string" ||
-            body.password !== env.CHAPPY_ADMIN_PASSWORD) {
-          return json({ error: "管理者パスワードが違います" }, 401);
+        const passwordCheck = await checkAdminPassword(body.password);
+        if (!passwordCheck.ok) {
+          return json({
+            error: passwordCheck.limited
+              ? "入力回数が上限に達しました。15分後にもう一度お試しください"
+              : "管理者パスワードが違います",
+          }, passwordCheck.limited ? 429 : 401);
         }
         const token = createToken();
         const tokenHash = await hashToken(token);
@@ -351,6 +400,9 @@ export default {
       return json({ error: "指定されたURLは存在しません" }, 404);
     } catch (error) {
       console.error("Worker Error:", error);
+      if (isAdminRoute) {
+        return json({ error: "管理画面でエラーが発生しました。時間をおいて再度お試しください" }, 500);
+      }
       return json({
         error: "Worker内部でエラーが発生しました",
         details: error.message,
