@@ -1,6 +1,6 @@
 export default {
   async fetch(request, env) {
-    const allowedAdminOrigin = "https://azalea-soda.github.io";
+    const allowedAdminOrigin = "https://chappy-memory-admin-test.pages.dev";
     const requestOrigin = request.headers.get("Origin") || "";
     const url = new URL(request.url);
     const path = url.pathname.replace(/\/+$/, "") || "/";
@@ -18,7 +18,7 @@ export default {
     const json = (data, status = 200) =>
       new Response(JSON.stringify(data), { status, headers });
 
-    // Admin preflight and actual requests are restricted to the GitHub Pages origin.
+    // Admin preflight and actual requests are restricted to the test Cloudflare Pages origin.
     if (isAdminRoute && requestOrigin !== allowedAdminOrigin) {
       return new Response(
         request.method === "OPTIONS" ? null : JSON.stringify({ error: "管理画面の接続元が許可されていません" }),
