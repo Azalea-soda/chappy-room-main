@@ -42,6 +42,22 @@ export default {
         return btoa(binary).replace(/\+/g, "-").replace(/\//g, "_").replace(/=/g, "");
       };
 
+      const nextId = async (series, prefix) => {
+        const table = series === "mother" ? "mother_memories" : "chappy_profile";
+        await env.DB.prepare(
+          "CREATE TABLE IF NOT EXISTS id_counters (series TEXT PRIMARY KEY, last_number INTEGER NOT NULL)"
+        ).run();
+        await env.DB.prepare(
+          "INSERT OR IGNORE INTO id_counters (series, last_number) SELECT ?, COALESCE(MAX(CAST(SUBSTR(id, 2) AS INTEGER)), 0) FROM " +
+          table
+        ).bind(series).run();
+        const row = await env.DB.prepare(
+          "UPDATE id_counters SET last_number = last_number + 1 WHERE series = ? RETURNING last_number"
+        ).bind(series).first();
+        if (!row) throw new Error("ID採番に失敗しました");
+        return prefix + String(row.last_number).padStart(3, "0");
+      };
+
       // Admin routes are isolated from device-token authentication.
       const isAdminRoute = path.startsWith("/admin/");
       if (isAdminRoute && requestOrigin !== allowedAdminOrigin) {
@@ -205,22 +221,6 @@ export default {
       if (!(await requireDevice())) {
         return json({ error: "端末認証に失敗しました" }, 401);
       }
-
-      const nextId = async (series, prefix) => {
-        const table = series === "mother" ? "mother_memories" : "chappy_profile";
-        await env.DB.prepare(
-          "CREATE TABLE IF NOT EXISTS id_counters (series TEXT PRIMARY KEY, last_number INTEGER NOT NULL)"
-        ).run();
-        await env.DB.prepare(
-          "INSERT OR IGNORE INTO id_counters (series, last_number) SELECT ?, COALESCE(MAX(CAST(SUBSTR(id, 2) AS INTEGER)), 0) FROM " +
-          table
-        ).bind(series).run();
-        const row = await env.DB.prepare(
-          "UPDATE id_counters SET last_number = last_number + 1 WHERE series = ? RETURNING last_number"
-        ).bind(series).first();
-        if (!row) throw new Error("ID採番に失敗しました");
-        return prefix + String(row.last_number).padStart(3, "0");
-      };
 
       const handleRecords = async (table, series, resultKey) => {
         if (body.action === "list") {
