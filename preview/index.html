@@ -838,9 +838,18 @@
             audio.onpause = () => {
               if (cancelled || generation !== responseGeneration) {
                 finish();
-              } else {
-                failPlayback(new Error('音声が予期せず一時停止しました'));
+                return;
               }
+              // 音声の最後まで再生された直後にも pause が通知される環境がある。
+              // ended または再生位置が末尾なら、異常停止ではなく正常終了として扱う。
+              const duration = audio.duration;
+              const nearEnd = Number.isFinite(duration) && duration > 0 &&
+                audio.currentTime >= duration - 0.25;
+              if (audio.ended || nearEnd) {
+                finish();
+                return;
+              }
+              failPlayback(new Error('音声が予期せず一時停止しました'));
             };
             audio.onerror = () => {
               console.error('音声再生エラー:', audio.error || 'unknown');
