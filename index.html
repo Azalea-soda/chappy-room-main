@@ -811,18 +811,40 @@
           if (generation !== responseGeneration) break;
 
           currentAudio = audio;
-          await new Promise(resolve => {
+          await new Promise((resolve, reject) => {
             let settled = false;
             const finish = () => {
               if (settled) return;
               settled = true;
               resolve();
             };
+            const failPlayback = (error) => {
+              if (settled) return;
+              settled = true;
+              cancelled = true;
+              textFinished = true;
+              if (currentVoiceAbortController) currentVoiceAbortController.abort();
+              if (prefetchedAudio && prefetchedAudio !== audio) {
+                prefetchedAudio.pause();
+                prefetchedAudio.removeAttribute('src');
+                prefetchedAudio.load();
+                prefetchedAudio = null;
+              }
+              notifySynthesis();
+              notifyPlayback();
+              reject(error);
+            };
             audio.onended = finish;
-            audio.onpause = finish;
+            audio.onpause = () => {
+              if (cancelled || generation !== responseGeneration) {
+                finish();
+              } else {
+                failPlayback(new Error('音声が予期せず一時停止しました'));
+              }
+            };
             audio.onerror = () => {
               console.error('音声再生エラー:', audio.error || 'unknown');
-              finish();
+              failPlayback(new Error('音声を再生できませんでした'));
             };
             audio.onplaying = () => {
               const playingAt = performance.now();
@@ -833,7 +855,7 @@
             if (result && typeof result.catch === 'function') {
               result.catch(error => {
                 if (generation === responseGeneration) console.error('音声再生開始エラー:', error);
-                finish();
+                failPlayback(error);
               });
             }
           });
