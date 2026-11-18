@@ -238,7 +238,7 @@
       expandButton.addEventListener('click', () => {
         const isExpanded = contentWrap.classList.toggle('expanded');
         body.classList.toggle('collapsed', !isExpanded);
-        expandButton.textContent = isExpanded ? '▼' : '▶';
+        expandButton.textContent = isExpanded ? '▲' : '▶';
         expandButton.setAttribute('aria-label', isExpanded ? '記録を閉じる' : '記録の全文を表示');
         expandButton.setAttribute('aria-expanded', String(isExpanded));
       });
