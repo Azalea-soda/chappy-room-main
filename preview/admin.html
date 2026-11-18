@@ -25,10 +25,21 @@
     .tabs button { margin: 0; padding: 10px 5px; background: #e9dfd2; color: #554638; }
     .tabs button[aria-pressed="true"] { background: #d99545; color: white; }
     .record { border: 1px solid #eadcc9; border-radius: 11px; padding: 13px; margin: 10px 0; background: #fffdf9; }
+    .record-layout { display: grid; grid-template-columns: minmax(0, 7fr) minmax(180px, 3fr); gap: 14px; align-items: start; }
+    .record-main { min-width: 0; }
     .record-meta { color: #786b5d; font-size: .85rem; }
     .record-content { white-space: pre-wrap; overflow-wrap: anywhere; line-height: 1.6; margin: 8px 0; }
-    .record-actions { display: grid; grid-template-columns: 1fr 1fr; gap: 7px; }
-    .record-actions button { margin: 0; }
+    .record-actions { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 7px; }
+    .record-actions button, .record-actions select { width: 100%; min-width: 0; margin: 0; padding: 10px 6px; font-size: .9rem; }
+    .record-actions select { border: 1px solid #cdbda9; background: #fff; color: inherit; border-radius: 9px; }
+    .record-summary { background: #fffdf9; border: 1px solid #eadcc9; border-radius: 10px; padding: 10px 12px; margin: 12px 0; line-height: 1.8; }
+    .password-row { display: flex; gap: 8px; align-items: stretch; }
+    .password-row input { flex: 1; min-width: 0; }
+    .password-row button { width: auto; min-width: 76px; margin: 0; padding: 8px 12px; }
+    @media (max-width: 520px) {
+      .record-layout { grid-template-columns: minmax(0, 1fr); }
+      .record-actions { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+    }
     #message { min-height: 1.5em; white-space: pre-wrap; }
     .muted { color: #786b5d; font-size: .9rem; }
     [hidden] { display: none !important; }
@@ -43,7 +54,10 @@
     <h2>管理者ログイン</h2>
     <form id="loginForm">
       <label for="adminPassword">管理者パスワード</label>
-      <input id="adminPassword" type="password" autocomplete="current-password" required>
+      <div class="password-row">
+        <input id="adminPassword" type="password" autocomplete="current-password" required>
+        <button id="togglePasswordButton" class="secondary" type="button" aria-pressed="false">👁️ 表示</button>
+      </div>
       <button id="loginButton" type="submit">ログイン</button>
     </form>
   </section>
@@ -72,6 +86,7 @@
 
     <section class="panel">
       <h2>保存されている記録</h2>
+      <div id="recordSummary" class="record-summary" aria-live="polite"></div>
       <button id="refreshButton" class="secondary" type="button">一覧を更新</button>
       <div id="records"></div>
     </section>
@@ -96,6 +111,7 @@
   const categoryInput = document.getElementById('category');
   const contentInput = document.getElementById('content');
   const recordsEl = document.getElementById('records');
+  const recordSummary = document.getElementById('recordSummary');
   const saveButton = document.getElementById('saveButton');
   const formTitle = document.getElementById('formTitle');
   const cancelEditButton = document.getElementById('cancelEditButton');
@@ -111,6 +127,14 @@
   };
 
   function setMessage(text) { message.textContent = text || ''; }
+
+  document.getElementById('togglePasswordButton').addEventListener('click', (event) => {
+    const button = event.currentTarget;
+    const isVisible = passwordInput.type === 'text';
+    passwordInput.type = isVisible ? 'password' : 'text';
+    button.textContent = isVisible ? '👁️ 表示' : '🙈 隠す';
+    button.setAttribute('aria-pressed', String(!isVisible));
+  });
   function showManager() {
     loginPanel.hidden = true;
     manager.hidden = false;
@@ -165,6 +189,15 @@
   }
   function renderRecords() {
     recordsEl.replaceChildren();
+    const counts = { total: currentRecords.length, active: 0, ended: 0, cancelled: 0 };
+    for (const record of currentRecords) {
+      if (record.status === '継続中') counts.active++;
+      else if (record.status === '終了') counts.ended++;
+      else if (record.status === '取り消し') counts.cancelled++;
+    }
+    recordSummary.textContent =
+      '現在の記録数：' + counts.total + '件 ／ 継続中：' + counts.active +
+      '件 ／ 終了：' + counts.ended + '件 ／ 取り消し：' + counts.cancelled + '件';
     if (!currentRecords.length) {
       const empty = document.createElement('p');
       empty.className = 'muted';
@@ -181,15 +214,37 @@
       const body = document.createElement('div');
       body.className = 'record-content';
       body.textContent = record.content || '';
+      const mainContent = document.createElement('div');
+      mainContent.className = 'record-main';
+      mainContent.append(meta, body);
+
       const actions = document.createElement('div');
       actions.className = 'record-actions';
       actions.append(
         makeButton('修正する', 'secondary', () => beginEdit(record)),
-        makeButton('追記する', 'secondary', () => appendRecord(record)),
-        makeButton('状態を変更する', 'secondary', () => changeStatus(record)),
+        makeButton('追記する', 'secondary', () => appendRecord(record))
+      );
+
+      const statusSelect = document.createElement('select');
+      statusSelect.setAttribute('aria-label', record.id + ' の状態');
+      for (const status of ['継続中', '終了', '取り消し']) {
+        const option = document.createElement('option');
+        option.value = status;
+        option.textContent = status;
+        statusSelect.append(option);
+      }
+      statusSelect.value = ['継続中', '終了', '取り消し'].includes(record.status)
+        ? record.status : '継続中';
+      statusSelect.addEventListener('change', () => changeStatus(record, statusSelect));
+      actions.append(
+        statusSelect,
         makeButton('削除する', 'danger', () => deleteRecord(record))
       );
-      card.append(meta, body, actions);
+
+      const layout = document.createElement('div');
+      layout.className = 'record-layout';
+      layout.append(mainContent, actions);
+      card.append(layout);
       recordsEl.append(card);
     }
   }
@@ -212,24 +267,26 @@
       await loadRecords();
     } catch (error) { setMessage(error.message); }
   }
-  async function changeStatus(record) {
-    const choices = ['継続中', '終了', '取り消し'];
-    const currentIndex = choices.indexOf(record.status);
-    const suggested = currentIndex >= 0 ? choices[currentIndex] : '継続中';
-    const next = window.prompt(
-      record.id + ' の状態を入力してね：継続中／終了／取り消し',
-      suggested
-    );
-    if (next === null) return;
-    if (!choices.includes(next.trim())) {
-      setMessage('状態は「継続中」「終了」「取り消し」のどれかを入力してね。');
+  async function changeStatus(record, statusSelect) {
+    const next = statusSelect.value;
+    if (!['継続中', '終了', '取り消し'].includes(next)) {
+      statusSelect.value = record.status || '継続中';
       return;
     }
-    if (!window.confirm(record.id + ' を「' + next.trim() + '」に変更する？')) return;
+    if (!window.confirm(record.id + ' を「' + next + '」に変更する？')) {
+      statusSelect.value = record.status || '継続中';
+      return;
+    }
+    statusSelect.disabled = true;
     try {
-      await api('/admin/records', { action: 'status', room: activeRoom, id: record.id, status: next.trim() });
+      await api('/admin/records', { action: 'status', room: activeRoom, id: record.id, status: next });
       await loadRecords();
-    } catch (error) { setMessage(error.message); }
+    } catch (error) {
+      statusSelect.value = record.status || '継続中';
+      setMessage(error.message);
+    } finally {
+      statusSelect.disabled = false;
+    }
   }
   async function deleteRecord(record) {
     if (!window.confirm('「' + (record.content || '').slice(0, 70) + '」を完全に削除するよ。元に戻せないけど、本当にいい？')) return;
@@ -299,7 +356,7 @@
       if (serverRevoked) {
         setMessage('ログアウトしたよ。');
       } else {
-        setMessage('この画面からはログアウトしたよ。ただしサーバー側の無効化は確認できなかったよ。セッションは最長30分で期限切れになるよ。' + (revokeError ? '\n' + revokeError : ''));
+        setMessage('この画面からはログアウトしたよ。ただしサーバー側の無効化は確認できなかったよ。セッションはログインから最長6時間で期限切れになるよ。' + (revokeError ? '\n' + revokeError : ''));
       }
     }
   });
