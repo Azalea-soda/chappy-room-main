@@ -129,7 +129,7 @@ export default {
         }
         const token = createToken();
         const timestamp = now();
-        const expiresAt = new Date(Date.now() + 30 * 60 * 1000).toISOString();
+        const expiresAt = new Date(Date.now() + 6 * 60 * 60 * 1000).toISOString();
         await env.DB.prepare(
           "INSERT INTO admin_sessions (id, token_hash, created_at, expires_at, revoked_at) VALUES (?, ?, ?, ?, NULL)"
         ).bind(crypto.randomUUID(), await hashToken(token), timestamp, expiresAt).run();
