@@ -398,3 +398,23 @@ main index/setup/images unchanged; production Worker unchanged/not deployed; pro
 - usage：prompt 374 / completion 73 / total 447 tokens、4.7142 Neurons。
 - 判定：Test 4不合格。重複保持とID保護はできたが、新情報の見落としがあった。
 
+
+
+## Test 5：不明情報を推測しない（2026-11-19）
+
+### 使用した架空会話
+母：「あの大会、今年も楽しみね。」
+母：「前に話したあの子も出るのかな？」
+
+### 結果
+- モデル：`@cf/zai-org/glm-4.7-flash`
+- thinking OFF、max_tokens 800。
+- HTTP 200、API success=true、finish_reason=stop。
+- 出力は有効なJSON（Markdownコードフェンスなし）。
+- 判定：「不明」。
+- recordsは空配列。大会名・競技名・人物名などを推測して記憶登録しなかった。
+- 確認事項として「『あの大会』とはどの大会か」「『あの子』とは誰か」の2点を提示。
+- 一時的な話題を確定した長期記憶として保存しないという指示にも沿った結果。
+- usage：prompt 398 / completion 48 / total 446 tokens、3.9362 Neurons。
+- 判定：Test 5合格。曖昧な指示対象を特定せず、確認質問に回せた。
+
