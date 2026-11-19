@@ -373,3 +373,28 @@ main index/setup/images unchanged; production Worker unchanged/not deployed; pro
 - 各テストはユーザーの明示許可後に1回ずつ推論し、実際の応答・usage・問題点をこのログに追記する。
 - 事前に承認されたテストセットの主題・評価基準は不用意に変更しない。
 - 無料枠、料金、停止条件の調査・明示承認なしに追加推論や有料利用へ進まない。
+
+
+## Test 4：重複と新情報の見分け（2026-11-19）
+
+### 入力した既存記憶と新しい架空会話
+既存記憶：
+- ID：M001
+- category：M
+- content：母は桜が好き。
+- created_at / updated_at：null
+
+新しい会話：
+- 母：「桜の季節が大好きなの。毎年楽しみにしているわ。」
+
+### 結果
+- モデル：`@cf/zai-org/glm-4.7-flash`
+- thinking OFF、max_tokens 800。
+- HTTP 200、API success=true、finish_reason=stop。
+- 出力は有効なJSON（Markdownコードフェンスなし）。
+- 判定：「重複があり、新規として追加すべき情報はない。」
+- recordsには既存記憶M001をそのまま返した。ID・category・contentを変更せず、日時もnullのまま保持。IDや日時の捏造なし。
+- **問題：新しい会話に含まれる「毎年楽しみにしている」という既存記憶にない継続的な期待・気持ちを、新規情報として抽出できなかった。** 「母は桜が好き」と「毎年桜の季節を楽しみにしている」は関連するが同一情報ではない。
+- usage：prompt 374 / completion 73 / total 447 tokens、4.7142 Neurons。
+- 判定：Test 4不合格。重複保持とID保護はできたが、新情報の見落としがあった。
+
