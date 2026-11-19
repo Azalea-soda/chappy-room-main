@@ -270,3 +270,106 @@ These are GitHub source settings; live deployed Worker version was not queried.
 main index/setup/images unchanged; production Worker unchanged/not deployed; production D1 not written/migrated; production memories not edited/deleted; no merge to main; no voice branch merge; no test runtime code change during this inspection. This was source comparison, not device or live Cloudflare validation.
 
 追記型で維持する。新しい調査では日付・参照SHA・確認内容を追記し、旧SHAと訂正履歴を残す。
+
+---
+
+# 12. Workers AI 記憶抽出テスト v1.0（2026-11-19）
+
+## 目的と安全境界
+チャッピーの会話から、母の記憶（M）・チャッピー自身の設定（C）・固定ルールを正しく抽出できるAI候補か、架空の日本語会話だけで独立評価する。これは抽出性能の検証であり、チャッピー本体の実装・接続・D1保存の作業ではない。
+
+- 対象モデル：Cloudflare Workers AI `@cf/zai-org/glm-4.7-flash`
+- 実行設定：thinking OFF
+- 実施日：2026-11-19（日本時間）
+- 実験データ：合成した架空会話のみ。実際のお母さんの会話・記憶は使用していない。
+- 本番HTML、Worker、D1、Pagesへの変更なし。GitHubへの今回の追記も調査ログだけ。
+- API推論は各回ユーザーの明示許可後に1回ずつ実行。無料枠や利用上限を超える自動再試行・有料化・自動課金は行わない。
+- API成功と抽出品質の合否は別に判定する。
+
+## Test 1：M/C/固定ルールの分類
+
+### 使用した架空会話
+- 母：「桜の季節が大好きなの。毎年楽しみだわ。」
+- 母：「チャッピーは、自分のことをチャッピーって呼んでね。」
+- 母：「分からないことがあったら、勝手に想像しないでね。分からないときは聞いてね。」
+
+### 試行1（thinking ON、max_tokens 400）
+- HTTP 200、API success=true。
+- reasoningがcompletion 400 tokensを使い切り、message.content=null、finish_reason=length。JSON出力なし。
+- usage：prompt 289 / completion 400 / total 689 tokens、16.1495 Neurons。
+- 判定：抽出内容を評価できず、出力上限による不成立。モデルの分類能力の不合格とは扱わない。
+
+### 試行2（thinking OFF、max_tokens 800）
+- HTTP 200、API success=true。
+- C「自分のことはチャッピーと呼ぶ」と固定ルール「分からないことは聞き、勝手に想像しない」は抽出。
+- M「桜の季節が大好き」「毎年楽しみ」が完全に欠落。
+- JSONをMarkdownのコードフェンスで囲んだ。
+- usage：prompt 289 / completion 133 / total 422 tokens、6.4307 Neurons。
+- 判定：Test 1不合格（Mの欠落、形式違反）。
+
+### 試行3（抽出手順を明確化した改善プロンプト、thinking OFF、max_tokens 800）
+改善点：発言を一つずつ確認し、M/C/固定ルールの全カテゴリを確認すること、最後に抽出漏れを点検すること、「毎年楽しみ」のような継続的な感情も保持することを明示。
+- HTTP 200、API success=true、finish_reason=stop。
+- JSON形式（コードフェンスなし）で4件を抽出：
+  - M：桜の季節が大好き。
+  - M：毎年桜の季節を楽しみにしている。
+  - C：自分のことをチャッピーって呼んでほしい。
+  - 固定ルール：不明なことは勝手に想像せず、聞く。
+- 4件すべて内容・分類とも正しく、感情/継続的な楽しみも保持。
+- usage：prompt 576 / completion 213 / total 789 tokens、10.9212 Neurons。
+- 判定：改善プロンプトでTest 1合格。最初の失敗から、抽出漏れ対策の指示改善が有効だった。
+
+## Test 2：感情の保持
+
+### 使用した架空会話
+母：「昨日、久しぶりに友達に会えたの。本当に嬉しかったわ。」
+
+### 結果
+- thinking OFF、max_tokens 800。
+- HTTP 200、API success=true、finish_reason=stop。
+- Mとして2件抽出：
+  - 久しぶりに友達に会えた
+  - 友達に会えて本当に嬉しかった
+- 出来事と感情を分けて保持し、「本当に嬉しかった」という感情の意味も正確に保持。
+- ただしJSONをMarkdownのコードフェンスで囲み、「JSONのみ」の形式指示に違反。
+- usage：prompt 539 / completion 115 / total 654 tokens、7.1505 Neurons。
+- 判定：内容面は合格、出力形式は要改善。全体評価は形式違反を残す。
+
+## Test 3：訂正処理
+
+### 入力した既存記憶と新しい架空会話
+既存記憶：
+- 母はバラが好き。
+
+新しい会話：
+- 母：「バラは苦手なの。桜のほうが好き。」
+
+### 結果
+- thinking OFF、max_tokens 800。
+- HTTP 200、API success=true、finish_reason=stop。
+- 「判定：訂正」と正しく判定。
+- 既存の「母はバラが好き」を過去情報として残し、新規候補「母はバラが苦手で、桜が好き」を抽出。
+- JSON形式は正しい（コードフェンスなし）。
+- **重大な問題：入力に存在しない既存記憶ID「1」と、日付「2023-01-01T00:00:00Z」「2023-10-25T10:00:00Z」を生成した。** これらのID・日付はテスト入力に一切与えていない。
+- usage：prompt 322 / completion 139 / total 461 tokens、6.8306 Neurons。
+- 判定：訂正内容の理解は成功。しかしIDと日付の捏造によりTest 3全体は不合格。
+- 次の試験では、既存記憶にIDや日付が与えられていない場合、AIがそれらを決して補完・捏造しないか確認する。ID・日時は記憶管理側が扱うべき情報であり、モデルに創作させない。
+
+## ここまでの集計
+| Test | 主な評価 | 判定 |
+|---|---|---|
+| 1 | 分類・抽出漏れ | 改善プロンプトで合格。初回改善前はM欠落 |
+| 2 | 出来事と感情の保持 | 内容合格、JSONコードフェンス違反 |
+| 3 | 訂正と履歴保持 | 訂正理解は成功、ID・日時捏造で不合格 |
+
+共通して確認された課題：
+1. 指示が曖昧/弱いとMの抽出漏れが起きる可能性。Test 1では全カテゴリの確認と最終漏れ点検を明示して改善した。
+2. JSONのみと指示してもMarkdownコードフェンスを付ける場合がある（Test 1試行2、Test 2）。
+3. 訂正内容は理解できても、入力にないID・日付を作る危険がある（Test 3）。この挙動は実データ管理で重大なため、後続試験でも厳しく確認する。
+
+## 次の作業
+- 次は承認済みテストセットのTest 4「重複と新情報の見分け」を実施する。
+- その後Test 5「不明情報を推測しない」を実施する。
+- 各テストはユーザーの明示許可後に1回ずつ推論し、実際の応答・usage・問題点をこのログに追記する。
+- 事前に承認されたテストセットの主題・評価基準は不用意に変更しない。
+- 無料枠、料金、停止条件の調査・明示承認なしに追加推論や有料利用へ進まない。
