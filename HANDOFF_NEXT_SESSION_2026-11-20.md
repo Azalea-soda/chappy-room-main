@@ -1,6 +1,9 @@
 # チャッピー開発・短い引き継ぎ（2026-11-20 更新）
 
 ## 明日の最初に読むもの
+
+記憶抽出モデルの5テスト結果（復元できた範囲・未回収情報）：
+[MEMORY_EXTRACTION_TEST_RESULTS_2026-11-19.md](https://github.com/Azalea-soda/chappy-room-main/blob/memory-admin-v1/MEMORY_EXTRACTION_TEST_RESULTS_2026-11-19.md)
 詳細な経緯・テスト結果・決定事項：
 [DIFF_INVESTIGATION_LOG_2026-11-18.md](https://github.com/Azalea-soda/chappy-room-main/blob/memory-admin-v1/DIFF_INVESTIGATION_LOG_2026-11-18.md)
 
@@ -52,10 +55,10 @@
 - 管理画面の集計表示など、既存ログ記載の改善項目の現状確認。
 
 ## 次回の最初の作業
-1. 詳細ログの最新追記と、現在の `memory-admin-v1` の `worker.js`・`preview/admin.html`・関連テスト記録を確認する。
-2. 管理画面の基本CRUDテストは完了済みとして扱い、再実施しない。
-3. AI抽出記憶の自動保存フローがどこまで実装されているか、既存コードを読み取り調査する。必要ならテスト環境のみで検証計画を立てる。
-4. 分類の統一は別課題として整理し、AI自動保存の安全設計と混同しない。
+1. `MEMORY_EXTRACTION_TEST_RESULTS_2026-11-19.md` を読み、既に実施したTest 1〜5の合否と分かっているNeurons値を把握する。同じテストを不用意に再実行しない。
+2. 元会話から各テストの正確な入力プロンプト・モデル出力JSON・Test 1/4/5のNeurons値を回収できるか確認する。不明な情報は推測で補わない。
+3. Test 3・4の失敗要因と改善案を整理する。
+4. その後、AI抽出記憶の自動保存フローの設計へ進む。管理画面の基本CRUDテストは完了済みとして扱い、再実施しない。
 5. 調査・進捗・判断をその都度この短い引き継ぎ書と詳細ログに記録する。
 
 ## 最新の安全確認
