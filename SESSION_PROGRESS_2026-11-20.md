@@ -35,3 +35,35 @@
 
 ## 安全境界
 この記録は文書更新のみ。main、本番Worker/D1/Pagesへの書き込み・変更・デプロイ・マージは行っていない。
+
+
+## 2026-11-20 コード読み取り調査：自動保存の現状
+
+### 確認したファイル・参照
+- `worker.js` SHA: `1668d0f20883bc377cf7ba777ff52d59eb0557cb`（422行）
+- `index.html` SHA: `e8badb522748e7ece2ba5e13ea7c5160911abcb6`（1009行）
+- `memory.json` SHA: `c9c1d85d56c0a96583ea0825bd998f6fc354ff74`
+- `profile.json` SHA: `cf19b65d22a811335c80415e1e598d10b748cdd1`
+
+### 確認できた現在の動作
+1. `index.html` は会話開始時に `loadChappyKnowledge()` を呼び、Worker経由で `/fixed-rules`、`/memories`、`/chappy-profile` の3種類を読み込む。
+2. 読み込んだ継続中の記憶を `buildChappySystemPrompt()` で会話用プロンプトにまとめている。
+3. お母さんの発話は `getChappyResponse(userText)` から `requestChappyAI()` に渡され、Workerの `/chat` へSSEストリーミングで送信される。
+4. Workerの `/chat` はGroq `openai/gpt-oss-120b` に会話メッセージを渡し、ストリームをクライアントへ中継する。
+5. Workerには通常APIとして `/memories` と `/chappy-profile` の `list/create/status/append` がある。ID採番と日時設定はWorker側で実施する。
+6. しかし、現行 `getChappyResponse()` の応答完了処理には記憶抽出・保存要求がなく、Worker `/chat` にも会話後の記憶抽出やD1への自動保存処理は見当たらない。
+
+### 現時点の結論
+**現行コードはD1の記憶を読み込んで会話に使う機能はあるが、会話から新しい記憶を抽出して自動保存する機能は未実装。**
+手動追加用のcreate APIはあるため、保存の土台はある。ただしAI抽出結果を同じ形式へ安全に変換し、既存記憶と照合してcreate/update/appendを実行する流れをこれから設計・実装する必要がある。
+これはGitHub上のソースコードを読み取った結果であり、Cloudflareに現在デプロイされているWorkerの実動作を照会したものではない。
+
+### 次に調べること
+- 以前のWorkers AI GLM-4.7-Flashによる記憶抽出テストのプロンプト・出力形式を再確認する。
+- 現行Groqの会話モデルと抽出処理をどう組み合わせるか、別モデル/別API呼び出しを使うかを検討する。無料枠・使用量・遅延に影響するため、ユーザーの無料利用方針を優先し、無断で有料経路を導入しない。
+- AI抽出の出力はJSONパーサー・スキーマ検証を通し、ID・日時をモデルに作らせない。Worker側で既存IDを照合して採番・更新する。
+- 曖昧な訂正や分類不一致、抽出失敗、API制限時は安全に保存を止める。
+- まずテスト環境の処理設計を行い、ユーザーに説明・相談してから実装する。本番への反映は別途明示承認が必要。
+
+### 安全境界
+この調査はGitHub上のソース読み取りのみ。HTML、Worker、D1、Pages、本番環境の変更・デプロイ・マージは行っていない。
