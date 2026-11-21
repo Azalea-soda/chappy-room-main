@@ -644,3 +644,47 @@ GLM-4.7-Flashは、明確な指示を与えた合成データの単一ケース�
 
 ### 今回の変更範囲
 本追記はGitHub上の調査ログのみ。アプリHTML、Worker、D1、Pages、本番環境への変更・デプロイ・マージは行っていない。
+
+
+---
+
+# 2026-11-21 409行baseline（worker2Fc30107）とmemory-admin-v1 Workerのroute比較
+
+## 比較対象
+- 基準：ユーザー提供の元Worker。過去の調査記録で `worker2Fc30107` / commit label `2fc30107` / 409行版として記録されたもの。今回、Library内のユーザー提供Workerソース（`貼り付けたMarkdown(5).md`）を読み直して照合。
+- 比較先：`Azalea-soda/chappy-room-main` の `memory-admin-v1/worker.js`、blob SHA `1668d0f20883bc377cf7ba777ff52d59eb0557cb`（422行）。
+- この比較はGitHub/Libraryのソース比較。Cloudflareに現在デプロイされているWorkerのコード一致や実行結果を証明しない。
+
+## ルート別の比較結果
+
+| 項目 | 元Worker | memory-admin-v1 | 判定 |
+|---|---|---|---|
+| HTTP method | POST / OPTIONS。GET等は405 | 同じ | 互換 |
+| CORS | 通常APIはOrigin * | 通常APIはOrigin *。/admin/*のみtest Pages originに限定 | 既存アプリへの影響なし。管理APIは意図した制限 |
+| /enroll | passwordをCHAPPY_ADMIN_PASSWORDと直接比較。成功時にdevice tokenを発行 | 同じ入力・成功JSON・device_tokens保存。SHA-256比較、IP単位の失敗回数制限を追加 | 成功時互換。誤入力時の応答に429/15分ロックが追加 |
+| device auth | Authorization BearerをSHA-256化しdevice_tokensで照合 | 同じ | 互換 |
+| /memories | list/create/status/append。返却key memories | 同じ | 互換 |
+| /chappy-profile | list/create/status/append。返却key profile | 同じ | 互換 |
+| /fixed-rules | 継続中のみlist、返却key fixedRules | 同じ | 互換 |
+| / と /chat | contentsをGroq messagesへ変換。stream:false固定。Gemini互換 candidates JSONを返す | stream未指定/falseは同じJSON。body.stream===trueの場合のみGroq SSEをtext/event-streamで返す | 旧クライアント互換を維持しSSEを追加 |
+| 不明route | 404 JSON | 同じ | 互換 |
+| 通常API例外 | 汎用500 JSON + details | 同じ | 互換 |
+
+## 確認できた追加機能
+- /admin/login、/admin/logout、/admin/records を追加。管理者セッションはdevice tokenと別系統。
+- 管理者セッションは6時間、token本体ではなくSHA-256 hashを保存。
+- 管理APIは `https://chappy-memory-admin-test.pages.dev` からのOriginのみ許可。
+- /admin/recordsはM/C/FRのlist/create/update/append/status/deleteを提供。
+- fixed_rules用FR採番を追加。M/Cの採番方式は元Workerと同じid_counters方式を継続。
+- admin_sessions migrationが必要。admin_login_attemptsはWorker内でCREATE TABLE IF NOT EXISTSにより初期化。
+
+## 差分として注意する点
+1. /enrollと/admin/loginは同じCHAPPY_ADMIN_PASSWORDおよび同じIP単位のadmin_login_attempts制限を共有する。したがって、同じIPから誤入力が5回に達すると、管理画面ログインだけでなく端末登録も15分間ロックされる。意図した防御だが、利用時の挙動として認識しておく。
+2. 管理者APIはtest Pages Originに限定される。別のOriginからは403となる。test Pages URLを変更する場合はWorker側の許可Originも一致させる必要がある。
+3. SSEはbody.stream===trueのときだけ有効。stream指定なしの既存アプリは従来どおりcandidates JSONを受け取る。SSEの実際のクライアント受信・音声再生は別途実機/デプロイ環境での確認事項。
+4. 管理者APIのDB処理はadmin_sessions migrationとテストD1 bindingが前提。GitHub上のwrangler.tomlは設定値であり、Cloudflare上の実接続を証明しない。
+
+## 結論
+**ソース上の既存アプリ向けAPI（/enroll、端末認証、M/C/固定ルール取得・操作、Groq JSON会話応答）は保持され、会話APIにSSE分岐と管理APIが追加されている。** 現時点で、既存アプリとの明確な破壊的なroute/schema変更は見つからなかった。未確認なのは、Cloudflare上のテストWorkerデプロイ版とGitHub blobの一致、テストPages/Worker/D1の実接続、およびライブSSE動作。
+
+今回、HTML/Worker/DB/Pagesのコード変更、D1書き込み、Cloudflare設定変更、デプロイ、マージは行っていない。
