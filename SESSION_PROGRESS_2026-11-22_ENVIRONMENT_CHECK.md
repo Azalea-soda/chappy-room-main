@@ -54,3 +54,39 @@ Cloudflare WorkerのSettings > Bindingsで以下を確認：
 ## 作業内容・安全境界
 今回行ったのはCloudflare画面の読み取り確認とGitHubの読み取りのみ。設定変更、D1への書き込み、Worker/Pagesのデプロイ、mainへの変更・マージは行っていない。
 次の作業は、同じ環境確認を繰り返すことではなく、既存の記憶抽出テスト結果・現行Workerソースを踏まえて、会話応答を妨げない記憶抽出・保存フローの設計／実装準備へ進むこと。
+
+
+## 2026-11-22 追加確認：Pages画面とWorker接続先の分離チェック
+
+GitHubの `memory-admin-v1` ブランチから以下のファイルを読み取り確認した（設定変更なし）。
+
+### 1. Pagesの会話画面 `preview/index.html`
+- ファイルSHA：`b606676a9b6e9e8adfd3cf5e6699894e7d1df3fc`
+- 242行目の `API_URL` は `https://super-violet-bc7e.nanami-moca.workers.dev`。
+- このURLは既存記録上の本番会話Worker。
+- D1読み込み（/fixed-rules、/memories、/chappy-profile）および会話（/chat）がこの `API_URL` を使う。
+- よって、Pagesの検証用会話画面からのAPI通信先は本番Workerであり、**会話画面の通信経路はテスト用Workerへ分離されていない**。テストPagesで会話すると本番Workerへアクセスする構成になっている。
+- Voice URLは `https://chappy-voicevox-test.nanami-moca.workers.dev/speak`（テスト用VOICEVOX Worker）。音声生成先はテスト用だが、会話・D1 API先が本番Workerである問題は解消しない。
+
+### 2. Pagesの管理画面 `preview/admin.html`
+- ファイルSHA：`94d5ed08088fbfe27fc9b378f179d4d499c6a3e2`
+- 115行目の `API_URL` は `https://chappy-memory-admin-test.nanami-moca.workers.dev`。
+- 管理画面はテスト専用Workerを指定している。ファイル内コメントにも本番Workerを指定しない旨がある。
+- したがって、管理画面のAPI接続先はテスト用Worker。
+
+### 3. Worker設定 `wrangler.toml`
+- ファイルSHA：`42998f912c34237111e01bd965d89592b56a226c`
+- Worker名：`chappy-memory-admin-test`
+- D1 binding：`DB`
+- database_name：`chappy-memory-test`
+- database_id：`fd96a54a-d13e-4c8f-bc62-7afffea55182`
+- Cloudflare画面でユーザーが確認した実バインディング名・DB名・IDと一致。
+
+### 4. 最終判定
+- Pagesプロジェクト／ブランチ、Workerプロジェクト／ブランチ、WorkerのD1接続先、管理画面のWorker URLはテスト用として確認できた。
+- しかし、Pages会話画面 `preview/index.html` の `API_URL` が本番会話Workerを指しているため、**テスト環境と本番環境は全経路で分離されていない。現状のままPagesの会話画面をテストに使わないこと。**
+- 次に必要な修正候補は、`preview/index.html` の `API_URL` をテスト専用Worker `https://chappy-memory-admin-test.nanami-moca.workers.dev` に向けること。ただし、これは現時点では提案であり、ファイル変更・Pages再デプロイはまだ実施していない。
+- 修正前に、テストWorkerの端末登録（/enroll）と会話（/chat）に必要な設定・秘密情報・CORS・D1テーブルが揃っているかをソースで確認する。必要なら `setup.html` 等の接続先も確認し、テスト用端末登録から会話までの経路を一貫してテスト用にする。main/index.htmlは本番用として変更しない。
+- PagesのBuild output directory設定値とPagesデプロイCommit SHAはCloudflare画面から確定できていない。これらは未確認のまま記録し、今回の確認を繰り返す目的でユーザーに同じ画面を再確認させない。
+
+この追加調査もGitHubファイルの読み取りのみ。ファイル変更、D1書き込み、Cloudflare設定変更、デプロイ、mainへの変更・マージは行っていない。
