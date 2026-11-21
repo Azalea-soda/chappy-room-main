@@ -90,3 +90,43 @@ GitHubの `memory-admin-v1` ブランチから以下のファイルを読み取�
 - PagesのBuild output directory設定値とPagesデプロイCommit SHAはCloudflare画面から確定できていない。これらは未確認のまま記録し、今回の確認を繰り返す目的でユーザーに同じ画面を再確認させない。
 
 この追加調査もGitHubファイルの読み取りのみ。ファイル変更、D1書き込み、Cloudflare設定変更、デプロイ、mainへの変更・マージは行っていない。
+
+
+## 2026-11-22 追加確認：テストWorkerの端末登録・会話接続の実装調査
+
+対象ブランチ：`memory-admin-v1`。GitHub上のソースを読み取りのみで確認。Cloudflare設定・コード・D1データは変更していない。
+
+### 1. テストWorker `worker.js`
+- SHA：`1668d0f20883bc377cf7ba777ff52d59eb0557cb`
+- `POST /enroll` を実装。管理者パスワード `CHAPPY_ADMIN_PASSWORD` を検証し、成功時は `device_tokens` にハッシュ化した端末トークンを登録する。
+- `POST /chat` を実装。Groq APIを `env.GROQ_API_KEY` で呼び出し、モデルは `openai/gpt-oss-120b`。SSE streamingに対応。
+- `POST /fixed-rules`、`/memories`、`/chappy-profile` は端末Bearer tokenを検証し、Workerに結び付いた `env.DB` から読み込む。
+- Workerの非管理者ルートはCORS許可Originが `*`。管理者ルートのみ `https://chappy-memory-admin-test.pages.dev` に制限。
+- `/enroll` と `/chat` のコード経路は存在する。ただし、テストWorker側に `CHAPPY_ADMIN_PASSWORD` と `GROQ_API_KEY` が実際に設定済みかはGitHubソースから確認できない（Cloudflare secretsは読み取っていない）。
+
+### 2. 端末登録画面 `setup.html`
+- SHA：`25a45d28f09b38b5b0fc570fac46b311afab4420`
+- 58行目の `API_URL` は本番会話Worker `https://super-violet-bc7e.nanami-moca.workers.dev`。
+- これはリポジトリ直下の `setup.html`。PagesのBuild output directoryが `preview` であれば、このファイルはPages公開物に含まれない。
+- `preview/` ディレクトリの一覧には `index.html` と `admin.html` のみで、`preview/setup.html` は存在しない。
+- したがって、現在の検証Pagesにはテスト用端末登録画面が存在しない可能性が高く、登録導線を新たにテスト用として用意する必要がある。既存端末のlocalStorage tokenを流用する前提にしない。
+
+### 3. Pages会話画面 `preview/index.html`
+- SHA：`b606676a9b6e9e8adfd3cf5e6699894e7d1df3fc`
+- 242行目の `API_URL` は本番会話Worker。
+- D1読み込み3経路と `/chat` の双方が同じ `API_URL` を使うため、会話画面のAPI接続先をテストWorkerに変更する必要がある。
+- Voice URLはテストVOICEVOX Workerのまま。
+
+### 4. 管理画面とDB
+- `preview/admin.html` SHA：`94d5ed08088fbfe27fc9b378f179d4d499c6a3e2`。API_URLはテスト専用Worker。
+- ユーザーが以前に管理画面の基本CRUDをテスト済みであること、および今回のD1 bindingがテストD1の名前・IDと一致することは既存記録にある。
+- リポジトリの `migrations/` には `0001_admin_sessions.sql` のみ存在。今回のソース調査では `device_tokens` 等の初期スキーマ作成マイグレーションは見つけられていない。D1上のテーブル存在・端末登録可能性は未確認。D1への照会・書き込みは行っていない。
+
+### 5. 安全な次の段取り（未実施）
+1. テストWorkerのCloudflare secret設定状況（`CHAPPY_ADMIN_PASSWORD`、`GROQ_API_KEY`）とD1の端末登録用テーブルの存在を、可能なら読み取りで確認する。秘密値そのものは表示・記録しない。
+2. `preview/setup.html` を新規に用意し、テストWorkerだけに登録する導線を作る案を検討する。既存root `setup.html` と本番画面は変更しない。
+3. `preview/index.html` のAPI_URLをテストWorkerに向ける変更案を準備する。
+4. 変更前に差分と影響範囲を提示し、ユーザー承認を得る。Pages再デプロイや実際の端末登録テストは別途明示的に確認してから行う。
+5. テスト会話画面からの会話・D1読み込みがテストWorker/D1にのみ届くことを確認するまで、検証Pagesで会話テストをしない。
+
+**現時点の結論：** Workerコードには端末登録・会話機能があるが、Pages会話画面と登録画面の接続先は本番向きのまま。テスト専用登録ページ、Worker secrets、端末登録用D1テーブルの状態が未確認のため、まだ接続先変更やテスト実行をしてはいけない。
