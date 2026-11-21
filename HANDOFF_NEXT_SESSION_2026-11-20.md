@@ -137,3 +137,21 @@
 4. テスト合格前に本番Worker/D1/Pagesやmainを変更しない。コード変更・デプロイ前にユーザーへ対象と影響を説明して確認する。
 
 この追記はソース調査記録のみ。アプリHTML、Worker、D1、Pages、本番環境への変更・デプロイ・マージは行っていない。
+
+
+## 2026-11-21 追加引き継ぎ：409行baselineとテストWorkerのroute比較完了
+
+- ユーザー提供の `worker2Fc30107`（過去記録上409行）と `memory-admin-v1/worker.js` SHA `1668d0f20883bc377cf7ba777ff52d59eb0557cb`（422行）のソース比較を実施。
+- /enroll、Bearer device auth、/memories、/chappy-profile、/fixed-rules、/ と /chat、HTTP method、CORS、404/500を比較。既存アプリ向けJSON/APIの破壊的変更は見つからず。
+- テストWorkerは管理者API（/admin/login、/admin/logout、/admin/records）、管理者セッション、Origin制限、ログイン試行制限、FR採番を追加。
+- /chatはbody.stream===trueのときだけSSE。stream未指定/falseは従来のcandidates JSONを維持。
+- 注意：/enrollと/admin/loginは同じIP単位ログイン失敗制限を共有。5回失敗で両方が15分ロックされる。
+- 詳細は `DIFF_INVESTIGATION_LOG_2026-11-18.md` の2026-11-21節。
+- この比較はソース上の互換性確認であり、Cloudflareライブデプロイ一致やSSE実動作の確認ではない。
+
+### 次に進む作業（重複調査しない）
+1. テストWorkerの実デプロイ先・実デプロイ版・接続D1を、Cloudflare上の実態とGitHub設定を分けて確認する。
+2. 既存の管理画面CRUDテストは完了済み。再テストを要求しない。
+3. テスト環境が確認できたら、記憶自動抽出・保存の実装段階へ進む。会話応答を最優先し、抽出は別処理。遅延・競合・無料枠上限時は抽出を停止し、自動再試行しない。
+
+今回の変更はGitHubの調査ログと引き継ぎ文書のみ。Worker/HTML/D1/Pages/Cloudflare設定の変更・デプロイ・マージなし。
