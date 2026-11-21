@@ -92,3 +92,34 @@ GitHub mainブランチの `index.html` を読み取り専用で確認。
 
 ## 変更履歴
 - 2026-11-21：初期JSON原本、本番D1、mainブランチのindex.htmlを読み取り専用で確認。アプリデータ・コード・Worker・デプロイの変更なし。
+
+
+## 2026-11-21 追加調査：開発ブランチのWorkerと会話プロンプト
+
+ユーザーから開発用Workerの所在について補足があり、mainだけでなく開発ブランチ `memory-admin-v1` を読み取り専用で確認した。
+
+### 確認ファイル
+- `memory-admin-v1/worker.js`（blob SHA: `1668d0f20883bc377cf7ba777ff52d59eb0557cb`）
+- `memory-admin-v1/index.html`
+- `memory-admin-v1/profile.json`
+
+### 確認結果
+1. `worker.js` は `memory-admin-v1` に存在する。mainブランチだけを確認して「worker.jsがない」とした先ほどの判断は確認範囲が不十分だった。mainのツリーには見当たらず、開発ブランチには存在する。
+2. 開発Workerには管理者ログイン・管理者セッション・M/C/固定ルール管理API、端末認証、Groq会話APIが実装されている。
+3. Workerの会話APIは `body.contents` を受け取り、roleを変換してGroqへ渡す。Worker内で `profile.json` を読み込む処理や、プロフィールを自動追加する処理は確認できなかった。
+4. 開発ブランチの `index.html` は会話前にD1の `/fixed-rules`、`/memories`、`/chappy-profile` を取得する。
+5. `buildChappySystemPrompt()` がD1の継続中固定ルール・母親の記憶・Cプロフィールから会話用文章を組み立てる。
+6. `getChappyResponse()` がその文章と母親の発話を結合し、`requestChappyAI()` が `contents` の role=user としてWorkerへ送信する。Workerもrole=userとしてGroqへ渡す。
+7. したがって開発ブランチでは、初期 `profile.json` を直接読むのではなく、D1のCプロフィールが会話リクエスト本文に含まれる。ただしsystem roleではなくuser roleの本文として送信される。
+
+### 未確認事項
+- これはGitHub開発ブランチのソース確認であり、Cloudflare本番Workerの実物・デプロイ版と同一とは限らない。
+- 本番Workerの現行ソース、稼働版、本番アプリの接続先は未確認。
+- 初期 `profile.json` の内容がD1 Cへどのように反映されたかも未確認。
+- 今回はGitHubの読み取りのみ。コード・D1・Cloudflare Worker・デプロイの変更なし。
+
+### 次の開始地点
+1. Cloudflare本番会話Worker `super-violet-bc7e` の現行ソースを読み取り専用で確認。
+2. 開発ブランチWorkerと本番Workerの差分・デプロイ状況を確認。
+3. 本番アプリの接続先とプロンプトの送信経路を確認。
+4. 初期 `profile.json` とD1 Cデータの関係を整理。
