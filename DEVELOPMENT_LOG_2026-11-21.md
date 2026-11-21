@@ -165,3 +165,39 @@ GitHub mainブランチの `index.html` を読み取り専用で確認。
 
 ### 変更範囲
 今回も読み取り専用調査のみ。アプリコード、D1データ、Cloudflare Worker、デプロイは変更していない。GitHubへの記録更新はこの作業ログと短い引き継ぎ書に限る。
+
+
+## 2026-11-21 追加調査：開発用管理画面と管理APIの接続・安全策
+
+### 確認ファイル
+- `memory-admin-v1/preview/admin.html`（blob SHA: `94d5ed08088fbfe27fc9b378f179d4d499c6a3e2`）
+- `memory-admin-v1/migrations/0001_admin_sessions.sql`（blob SHA: `064461bdf22e94e4b46101aba18f73898e791d10`）
+- `memory-admin-v1/wrangler.toml`（blob SHA: `42998f912c34237111e01bd965d89592b56a226c`）
+- `memory-admin-v1/worker.js`（blob SHA: `1668d0f20883bc377cf7ba777ff52d59eb0557cb`）
+
+### 管理画面で確認した機能
+- M（お母さんの記憶）・C（チャッピープロフィール）・固定ルールを切り替えるタブがある。
+- 新規追加、既存記録の修正、同一IDへの追記、状態変更、完全削除の画面操作がある。
+- 各部屋の全記録数と、継続中・終了・取り消しの件数を表示する。
+- 表示する記録本文や分類はDOMの `textContent` で設定され、確認した箇所では `innerHTML` によるHTML挿入は使っていない。
+- 削除前に確認ダイアログを表示する。
+
+### 接続先・テスト環境の設定
+- 管理画面のAPI URLは `https://chappy-memory-admin-test.nanami-moca.workers.dev`。
+- Workerの管理画面許可Originは `https://chappy-memory-admin-test.pages.dev`。
+- `wrangler.toml` のWorker名は `chappy-memory-admin-test`、D1名は `chappy-memory-test`。D1 IDもテスト用として記載されている。
+- 管理者セッション用の `admin_sessions` テーブル作成SQLが `migrations/0001_admin_sessions.sql` にあり、コメントでも隔離されたテストD1にのみ適用し、本番適用は明示承認まで禁止としている。
+- これらはリポジトリ内の設定値の確認であり、Cloudflare上で当該Worker／Pages／D1が実際に作成・デプロイ・接続済みかは未確認。
+
+### 注意点・未確認事項
+1. `preview/admin.html` のコメントは「テスト専用Workerが用意できるまで接続先を空にする」と説明しているが、実際の `API_URL` にはテスト用Worker URLが設定済み。コメントとコードが一致していない。URLが実際に稼働中か、接続先D1がテストDBかは未確認。
+2. 管理画面は管理者トークンを `sessionStorage` に保存し、API呼び出しのBearerトークンとして送る。タブ／セッション終了時の扱いはあるが、XSS等で同一オリジンのスクリプトが動いた場合の保護を別途検討する必要がある。
+3. Worker側は管理ルートのOriginを特定のPages URLに制限し、管理者パスワード・セッションBearerトークンでも認証する。Origin制限はブラウザ経由のアクセス制御補助であり、単独で認証の代わりにはならない。
+4. 管理者ログインは失敗回数制限を持ち、管理セッションは6時間で期限切れ。トークンはハッシュ化してD1保存し、ログアウト時は失効処理を行う。
+5. 管理画面の実動作、CORSの実環境確認、セッション失効、失敗回数制限、管理操作の一連のテストは未実施。
+6. `preview/admin.html` がCloudflare Pagesのどのプロジェクト／ルート設定で配信されるか、Pages側の実際の公開状態は未確認。リポジトリ内に見つかったWorkflowはWorker構文チェック用のみで、Pagesデプロイの証拠にはならない。
+
+### 次の確認候補
+- テスト専用Worker・Pages・D1が実際に分離されていることを、既存の設定資料・デプロイ記録から確認する（本番Workerや本番D1は変更しない）。
+- 管理画面の接続URLとコメントの不一致を、コード変更せず記録上の注意事項として保持する。
+- 管理APIの認証・Origin・セッション・ID採番・削除時の動作を、テスト環境が確認できてから安全なテスト計画に落とす。
