@@ -188,3 +188,40 @@
 - 2026-11-22：`SESSION_PROGRESS_2026-11-22_ENVIRONMENT_CHECK.md` — テスト環境・接続先・D1テーブルの確認記録
 
 次回作業が終わったら、この一覧に新しい作業記録を追加する。古い記録は履歴として残し、現在の状態は本ファイルに集約する。
+
+---
+
+## 10. 2026-11-22 今日の作業：本番コードとテストコードの読み分け（読み取りのみ）
+
+### 今日確認したこと
+
+- `main` ブランチの `index.html` SHA：`ab95512d8a141a21e0a08011499e4faa8b85ee54`
+- `memory-admin-v1` ブランチの `index.html` SHA：`e8badb522748e7ece2ba5e13ea7c5160911abcb6`
+- 両ブランチの画面コードで確認できた接続先：
+  - 会話・D1読み込み：`https://super-violet-bc7e.nanami-moca.workers.dev`
+  - 音声生成：`https://chappy-voicevox-test.nanami-moca.workers.dev/speak`
+- つまり、mainのお部屋画面にもテスト用VOICEVOX Workerへの接続が残っている。
+- mainの `index.html` は `/fixed-rules`、`/memories`、`/chappy-profile` からD1データを読み込み、`buildChappySystemPrompt()` で会話用の文章を組み立ててから `/chat` へ送る構成。
+- mainブランチのルートには `worker.js` と `wrangler.toml` が存在しない（GitHub Contents APIで404）。したがって、memory-admin-v1の `worker.js` をそのまま本番Workerのソースとみなしてはいけない。
+- memory-admin-v1の `worker.js` SHA：`1668d0f20883bc377cf7ba777ff52d59eb0557cb`。対応する `wrangler.toml` はテストWorker `chappy-memory-admin-test` とテストD1 `chappy-memory-test` を指定している。
+- memory-admin-v1の `migrations/` には `0001_admin_sessions.sql` のみ存在。
+- memory-admin-v1の `worker.js` は `device_tokens` をSELECT/INSERTするが、worker.js内にCREATE TABLEはなく、migrationにも定義がない。テストD1で `device_tokens` が存在しなかったという11/22の確認結果と整合する。
+- `profile.json` と `memory.json` は両ブランチに存在するが、mainの `index.html` ではこれらJSONファイルを直接fetchしていない。現行画面コードはD1の3経路から読み込む。初期JSONをD1へ投入する経路は別途確認が必要。
+- GitHubのブランチ比較では `memory-admin-v1` は `main` に対して77コミット先行・10コミット遅れの分岐状態。テスト用コード・記録が多数追加されている。mainを無条件に上書き・マージしない。
+
+### 今日の判定
+
+- 本番のお部屋画面の会話Worker接続先と、音声Worker接続先が分かった。
+- 本番のお部屋画面は現状、会話APIは本番Worker、音声APIはテストVOICEVOX Workerへ接続する構成。
+- mainブランチ内に本番Workerのソースがないため、本番Workerの実際の稼働コード・D1スキーマをGitHubのmemory-admin-v1だけから断定できない。
+- 本番Worker・本番D1への変更、画面コード変更、D1書き込み、デプロイは一切していない。
+
+### 次の一手
+
+1. 本番の現状を保全する「アーカイブ2」を作る対象と保存先を確認する。GitHubのmainブランチを基準にした復元用ブランチを作る案があるが、ユーザーが了承するまでは作成しない。
+2. その後、本番Workerの現行コードを特定し、mainのお部屋画面と接続先・API仕様を照合する。
+3. 本番のコード・データのバックアップを確認してから、実際の会話実装に進む。テストWorkerのコードを本番Workerのコードと混同しない。
+
+### 本日の操作範囲
+
+GitHubのファイル・ブランチ・差分を読み取ったのみ。コード変更、ブランチ作成、D1変更、Secrets変更、Worker/Pages設定変更、デプロイは行っていない。
