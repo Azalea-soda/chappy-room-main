@@ -50,3 +50,18 @@ CREATE TABLE IF NOT EXISTS device_tokens (
 ## 呼び方・保護ルール
 
 Cloudflare上の実リソース名 `chappy-memory-test` は現時点では変更しない。これは完成版へ引き継いで育てる開発環境であり、使い捨てのTEST環境として扱わない。今後の説明・記録では「開発環境」「開発版」と呼ぶ。リソース名変更は接続影響を調査し、個別承認を得てから行う。
+
+
+---
+
+## 2026-11-22 追加：開発端末登録ページ公開・このPCの登録成功
+
+- GitHubの `preview/device-enroll.html` は作成・更新済み。開発Worker `chappy-memory-admin-test` の `/enroll` のみへ接続し、トークンはブラウザーの `chappy_device_token_dev` に保存する。本番用保存キーとは別。
+- Pages公開URL：`https://chappy-memory-admin-test.pages.dev/device-enroll.html`
+- ユーザーがページで登録を実行し、成功メッセージ「開発端末の登録が完了したよ。開発用トークンをこのブラウザーに保存したよ。」を確認した。
+- よって、このPCの開発端末登録とブラウザー内トークン保存は成功。
+- パスワード・端末トークンの値はGitHubやチャットに記録しない。
+- 本番Worker/D1/端末情報/Secrets/お部屋画面は変更していない。母の実機登録も未実施。
+- **未完了：** 認証必須APIでトークン認証が実際に通ることの確認。
+- **重要：** `preview/index.html` は会話API_URLが本番Workerのままなので、接続分離前に会話テストをしない。
+- 次回は開発Workerの認証必須ルートを読み、開発環境だけで安全に認証確認できるAPIを特定してから検証する。
