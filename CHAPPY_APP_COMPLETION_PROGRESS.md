@@ -421,3 +421,13 @@ SELECT name FROM sqlite_master WHERE type = 'table' ORDER BY name;
 Cloudflare上の実名に `test` が含まれていても、これは完成版へ引き継いで育てる開発環境であり、使い捨てのTESTではない。今後の説明・記録では「開発環境」「開発版」と呼ぶ。実リソース名の変更は接続影響を確認し、個別承認を得てから行う。
 
 詳細記録：`SESSION_PROGRESS_2026-11-22_DEVICE_TOKEN_MIGRATION.md`
+
+
+### 2026-11-22 端末登録・認証ソースの追加確認
+
+- 開発Worker `worker.js` の `/enroll` は管理者パスワードを確認し、端末トークンを発行してハッシュを `device_tokens` に保存する。
+- 端末認証は `Authorization: Bearer` のトークンをハッシュ化し、`device_tokens` から `revoked_at IS NULL` のレコードを検索する。
+- 今回作成したテーブル定義の列名は、開発WorkerのINSERT/SELECTと一致する。
+- ただし、ルート `setup.html` は本番会話Workerへ接続するため、開発用登録に使ってはいけない。ブランチ内に `preview/setup.html` も存在しない。
+- 次は開発Workerだけを接続する端末登録ページを別ファイルとして用意し、接続先とトークン保存方法を確認してから開発環境で登録・認証を検証する。
+- 現時点では端末登録・認証テストは未実施。本番側への登録・変更は一切行っていない。
