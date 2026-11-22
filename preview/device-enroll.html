@@ -1,0 +1,131 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="robots" content="noindex,nofollow">
+  <title>チャッピー 開発端末登録</title>
+  <style>
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      padding: 28px 18px;
+      background: #fff8ee;
+      color: #554638;
+      font-family: sans-serif;
+    }
+    main {
+      width: min(440px, 100%);
+      margin: 28px auto;
+      padding: 22px;
+      background: #fff;
+      border: 1px solid #eadcc9;
+      border-radius: 16px;
+    }
+    h1 { text-align: center; font-size: 1.35rem; }
+    p { line-height: 1.7; }
+    .notice {
+      padding: 12px;
+      border-radius: 10px;
+      background: #fff3dc;
+      font-size: .92rem;
+    }
+    label { display: block; margin: 18px 0 7px; font-weight: 700; }
+    input, button {
+      width: 100%;
+      padding: 13px;
+      border-radius: 9px;
+      font: inherit;
+    }
+    input { border: 1px solid #cdbda9; }
+    button {
+      margin-top: 14px;
+      border: 0;
+      background: #d99545;
+      color: white;
+      font-weight: 700;
+      cursor: pointer;
+    }
+    button:disabled { opacity: .55; cursor: wait; }
+    #message { min-height: 1.5em; margin-top: 16px; line-height: 1.6; }
+    [hidden] { display: none !important; }
+  </style>
+</head>
+<body>
+  <main>
+    <h1>🐱 チャッピー 開発端末登録</h1>
+    <p class="notice">
+      これは開発環境専用の登録ページだよ。開発用Workerと開発用D1だけを使うよ。お母さんが使っている本番環境の登録情報や保存済みトークンには触れないよ。
+    </p>
+
+    <p>開発用の端末認証を確認するため、管理者パスワードを入力してね。</p>
+
+    <form id="registerForm">
+      <label for="password">管理者パスワード</label>
+      <input
+        id="password"
+        type="password"
+        autocomplete="current-password"
+        required
+      >
+      <button id="registerButton" type="submit">開発端末を登録する</button>
+    </form>
+
+    <p id="message" role="status" aria-live="polite"></p>
+  </main>
+
+  <script>
+    // 開発環境専用。既存の本番用トークン保存先とは分ける。
+    const API_URL = "https://chappy-memory-admin-test.nanami-moca.workers.dev";
+    const TOKEN_KEY = "chappy_device_token_dev";
+
+    const form = document.getElementById("registerForm");
+    const passwordInput = document.getElementById("password");
+    const registerButton = document.getElementById("registerButton");
+    const message = document.getElementById("message");
+
+    if (localStorage.getItem(TOKEN_KEY)) {
+      form.hidden = true;
+      message.textContent = "このブラウザーには開発用端末トークンが保存されているよ。重複登録はしないよ。";
+    }
+
+    form.addEventListener("submit", async (event) => {
+      event.preventDefault();
+      if (localStorage.getItem(TOKEN_KEY)) {
+        form.hidden = true;
+        message.textContent = "開発用端末はすでに登録済みだよ。";
+        return;
+      }
+
+      registerButton.disabled = true;
+      message.textContent = "開発端末を登録中だよ。少し待ってね…";
+
+      try {
+        const response = await fetch(API_URL + "/enroll", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            password: passwordInput.value,
+            label: "開発端末（登録確認用）"
+          })
+        });
+
+        const data = await response.json();
+
+        if (!response.ok || !data.success || !data.token) {
+          throw new Error(data.error || "登録できなかったよ。");
+        }
+
+        // トークンは画面やGitHubに表示せず、このブラウザーの開発用キーにだけ保存。
+        localStorage.setItem(TOKEN_KEY, data.token);
+        passwordInput.value = "";
+        form.hidden = true;
+        message.textContent = "開発端末の登録が完了したよ。開発用トークンをこのブラウザーに保存したよ。";
+      } catch (error) {
+        message.textContent = "登録できなかったよ。管理者パスワードや通信状態を確認してね。";
+        registerButton.disabled = false;
+      }
+    });
+  </script>
+</body>
+</html>
