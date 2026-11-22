@@ -7,5 +7,5 @@ CREATE TABLE IF NOT EXISTS device_tokens (
   token_hash TEXT NOT NULL UNIQUE,
   created_at TEXT NOT NULL,
   revoked_at TEXT,
-  label TEXT NOT NULL
+  label TEXT
 );
