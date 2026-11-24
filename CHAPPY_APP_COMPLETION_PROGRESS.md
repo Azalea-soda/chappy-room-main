@@ -1098,3 +1098,30 @@ GitHubの `memory-admin-v1` ブランチから `worker.js` と `preview/index.ht
 5. 会話応答を最優先し、音声認識・Groq応答・VOICEVOX「ずんだもん・ノーマル」読み上げを個別に確認する。
 
 本番環境への変更・デプロイ・D1書き込みは引き続き禁止。必要な操作は対象と影響を事前説明し、明示承認を得る。
+
+
+## 27. 2026-11-24 作業記録：開発画面の画像が表示されない問題を修正
+
+### 1. 原因
+- Cloudflare Pagesの公開ディレクトリは `preview`。
+- しかし、画像5ファイルはリポジトリ直下にあり、`preview` の公開対象に含まれていなかった。
+- `preview/index.html` の画像参照先は `/chappy-room-main/...` となっており、Pagesの公開URL上のパスと一致していなかった。
+- そのため、背景・チャッピー画像・はなまる・マイク画像が表示されなかった。
+
+### 2. 開発環境だけに実施した修正
+- 元画像を変更せず、既存の画像Blobをそのまま `preview/` に追加した。
+  - `preview/bg-winter.png`
+  - `preview/cat-default.png`
+  - `preview/hanamaru.png`
+  - `preview/mic-bk.png`
+  - `preview/mic-icon.png`
+- `preview/index.html` 内の画像参照6か所を `/chappy-room-main/` から `/` に修正。
+- GitHubで再取得し、`preview/index.html` に旧パスが残っていないこと、および画像ファイル5件が `preview/` に存在することを確認。
+- 変更コミット：`22c17250e3a2b0d6f06a275566f1ceca4b9c91a3`（「開発画面の画像公開先を修正」）。
+- ブランチ：`memory-admin-v1`。Cloudflare PagesのProduction branchは同ブランチ、Build output directoryは `preview` と確認済みのため、自動デプロイ対象となる構成。
+
+### 3. 未確認事項・次の作業
+- GitHub上の修正は完了したが、Cloudflare Pagesの新しいデプロイ完了とブラウザ表示はまだ未確認。
+- ユーザーに開発用Pagesを再読み込みしてもらい、背景・チャッピー・マイク等の画像表示を確認する。
+- 画像表示が直った後も、AI会話はまだテストしない。開発Workerの `GROQ_API_KEY` は未設定と確認済みのため、設定有無を安全に確認してから会話経路を検証する。
+- 本番のルート `index.html`、画像ファイル、Worker、D1、Pages設定は変更していない。
