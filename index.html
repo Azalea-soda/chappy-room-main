@@ -333,11 +333,13 @@
         .filter(Boolean);
       const motherMemories = cachedD1Memories
         .filter(memory => memory.status === '継続中')
-        .map(memory => '[' + (memory.category || '記憶') + '] ' + (memory.content || ''))
+        .map(memory => '[' + (memory.category || '記憶') +
+          (memory.drawer_name ? '／' + memory.drawer_name : '') + '] ' + (memory.content || ''))
         .filter(Boolean);
       const chappyProfile = cachedD1ChappyProfile
         .filter(profile => profile.status === '継続中')
-        .map(profile => '[' + (profile.category || 'プロフィール') + '] ' + (profile.content || ''))
+        .map(profile => '[' + (profile.category || 'プロフィール') +
+          (profile.drawer_name ? '／' + profile.drawer_name : '') + '] ' + (profile.content || ''))
         .filter(Boolean);
       return [
         '【チャッピーの固定ルール】',
