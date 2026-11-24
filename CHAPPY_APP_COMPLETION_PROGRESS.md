@@ -977,6 +977,59 @@ https://github.com/Azalea-soda/chappy-room-main/blob/memory-admin-v1/preview/adm
 - 本番環境は引き続き保護し、明示承認なしに本番D1・Worker・Pages・Secrets・デプロイを変更しない。
 
 
+
+## 25. 2026-11-24 作業記録：開発D1の初期データ登録完了・会話テストへ移行
+
+### 1. 開発D1への登録結果（ユーザー実行・画面結果で確認）
+
+対象：Cloudflare開発D1 `chappy-memory-test`。本番D1 `chappy-memory` は変更していない。
+
+- `chappy_profile`：C001〜C023、23件。既存の登録・確認結果を維持。
+- `mother_memories`：M001〜M018、18件を登録。登録後の読み取りSQLで件数18、最小ID M001、最大ID M018を確認。
+- `id_counters`：`mother=18` をINSERT ... ON CONFLICTで設定し、Cloudflare画面で「正常に実行」を確認。
+- `fixed_rules`：FR001〜FR027、27件。FR027の内容を含む読み取りSQLで件数27・FR027本文を確認。
+- `id_counters`：`fixed=27` をINSERT ... ON CONFLICTで設定し、Cloudflare画面で「正常に実行」を確認。更新後の読み取り再確認は未実施。
+- 次回の通常採番予定：M019、FR028（カウンター更新SQLの成功結果に基づく。必要時に通常登録前の読み取り確認を行う）。
+- FR027のcategoryは `conversation`。本文は「お母さんがチャッピーに話してくれた大切な出来事や初めての体験は、心に残る重要な共有事項として丁寧に受け止め、記憶候補にする。」。
+- 初回の複数SQLに `BEGIN TRANSACTION` を含めた際、D1コンソールからトランザクションAPIを使うようエラーが返った。その後、読み取りで未登録（M=0、FR027=0）を確認してから、トランザクション文を使わずに個別SQLを実行し直した。重複登録は発生していない。
+- M016・M017はユーザー承認済みの案内用プレースホルダー。実際の思い出・感情を捏造したものではない。
+
+### 2. 2026-11-24時点のD1確認表
+
+| 対象 | 確認結果 |
+|---|---|
+| `chappy_profile` | C001〜C023、23件（既存確認結果） |
+| `mother_memories` | 18件、M001〜M018（今回読み取り確認済み） |
+| `fixed_rules` | 27件、FR027本文まで読み取り確認済み |
+| `id_counters.mother` | 18（SQL正常実行。更新後の再読取は未実施） |
+| `id_counters.fixed` | 27（SQL正常実行。更新後の再読取は未実施） |
+| 本番D1・本番Worker・本番アプリ | 今回変更なし |
+
+### 3. 作業順序の最新変更
+
+ユーザーと相談し、次の優先順で進める。
+
+1. **開発版での会話テスト**：まずチャッピーとの会話・音声を実際に確認する。会話画面が開発Workerと開発D1だけを使うことを確認してから行う。
+2. **AI記憶抽出**：会話応答を最優先し、抽出を独立したバックグラウンド処理として実装・検証する。会話の遅延・失敗・無料枠圧迫が起きる場合は抽出をスキップする。
+3. **管理画面**：M/Cの実データを使って最後に仕上げる。
+
+以前の「M/Cを揃えて管理画面を先に完成し、その後に会話連携」という順序は、この最新決定により変更する。管理画面の必須要件（大分類→引き出し名→個別情報、引き出し名の選択・新規作成、グループ表示、個別操作）は保持する。
+
+### 4. 会話テスト前の安全上の注意・現在地
+
+- ルート `index.html` と `preview/index.html` は、既存記録上、本番会話Worker `super-violet-bc7e.nanami-moca.workers.dev` を参照している。現状のまま会話テストに使わない。
+- 開発Workerは `chappy-memory-admin-test.nanami-moca.workers.dev`、開発D1は `chappy-memory-test`。会話用ルートが開発Worker側に実装・デプロイされ、D1 bindingも開発D1を参照することを確認する。
+- 既存の部屋画面・画像・ボタン状態・音声入力・読み上げ・中断動作を変更しない。音声はVOICEVOX「ずんだもん・ノーマル」を使用する。
+- VOICEVOX Workerの既知URLは `https://chappy-voicevox-test.nanami-moca.workers.dev/speak`。
+- 会話画面を開発Workerへ安全に分離するため、まずGitHub上の現行 `worker.js` と `preview/index.html` の会話経路・API_URL・音声設定を読み取り確認する。まだファイル変更・Worker設定変更・デプロイ・本番接続操作は行わない。
+- 開発WorkerのD1 bindingと会話ルートの実際の動作は、過去の管理用ルート確認だけで完了扱いしない。会話テスト前に必要な範囲で確認する。
+- 本番コード・本番Worker・本番D1・Secrets・Pages設定・デプロイは、事前説明と明示承認なしに変更しない。
+
+### 5. 次の一手
+
+GitHubの `memory-admin-v1` ブランチから `worker.js` と `preview/index.html` を読み取り、会話APIの経路、認証方式、API_URL、VOICEVOX接続を照合する。最小変更で開発版の会話テストを可能にする案を整理してから、変更対象・影響・戻し方を説明する。
+
+
 ## 18. 最後に…
 
 ### 開発者からチャッピー軍団への共有
