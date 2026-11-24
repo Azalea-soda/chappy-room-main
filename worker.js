@@ -174,38 +174,54 @@ export default {
         const room = rooms[body.room];
         if (!room) return json({ error: "管理対象が正しくありません" }, 400);
         const table = room.table;
+        const hasDrawer = table !== "fixed_rules";
 
         if (body.action === "list") {
+          const columns = hasDrawer
+            ? "id, category, drawer_name, content, created_at, updated_at, status"
+            : "id, category, content, created_at, updated_at, status";
+          const order = hasDrawer
+            ? "category ASC, drawer_name ASC, created_at ASC"
+            : "created_at ASC";
           const result = await env.DB.prepare(
-            "SELECT id, category, drawer_name, content, created_at, updated_at, status FROM " +
-            table + " ORDER BY category ASC, drawer_name ASC, created_at ASC"
+            "SELECT " + columns + " FROM " + table + " ORDER BY " + order
           ).all();
           return json({ success: true, records: result.results || [] });
         }
 
         if (body.action === "create") {
-          if (!validText(body.category, 100) || !validText(body.drawer_name, 200) ||
+          if (!validText(body.category, 100) || (hasDrawer && !validText(body.drawer_name, 200)) ||
               !validText(body.content)) {
             return json({ error: "大分類・引き出し名・内容が正しくありません" }, 400);
           }
-          let id;
-          id = await nextId(room.series, room.prefix);
+          const id = await nextId(room.series, room.prefix);
           const timestamp = now();
-          await env.DB.prepare(
-            "INSERT INTO " + table +
-            " (id, category, drawer_name, content, created_at, updated_at, status) VALUES (?, ?, ?, ?, ?, ?, '継続中')"
-          ).bind(id, body.category.trim(), body.drawer_name.trim(), body.content.trim(), timestamp, timestamp).run();
+          if (hasDrawer) {
+            await env.DB.prepare(
+              "INSERT INTO " + table +
+              " (id, category, drawer_name, content, created_at, updated_at, status) VALUES (?, ?, ?, ?, ?, ?, '継続中')"
+            ).bind(id, body.category.trim(), body.drawer_name.trim(), body.content.trim(), timestamp, timestamp).run();
+          } else {
+            await env.DB.prepare(
+              "INSERT INTO " + table +
+              " (id, category, content, created_at, updated_at, status) VALUES (?, ?, ?, ?, ?, '継続中')"
+            ).bind(id, body.category.trim(), body.content.trim(), timestamp, timestamp).run();
+          }
           return json({ success: true, id });
         }
 
         if (body.action === "update") {
           if (!validText(body.id, 100) || !validText(body.category, 100) ||
-              !validText(body.drawer_name, 200) || !validText(body.content)) {
+              (hasDrawer && !validText(body.drawer_name, 200)) || !validText(body.content)) {
             return json({ error: "ID・大分類・引き出し名・内容が正しくありません" }, 400);
           }
-          const result = await env.DB.prepare(
-            "UPDATE " + table + " SET category = ?, drawer_name = ?, content = ?, updated_at = ? WHERE id = ?"
-          ).bind(body.category.trim(), body.drawer_name.trim(), body.content.trim(), now(), body.id).run();
+          const result = hasDrawer
+            ? await env.DB.prepare(
+                "UPDATE " + table + " SET category = ?, drawer_name = ?, content = ?, updated_at = ? WHERE id = ?"
+              ).bind(body.category.trim(), body.drawer_name.trim(), body.content.trim(), now(), body.id).run()
+            : await env.DB.prepare(
+                "UPDATE " + table + " SET category = ?, content = ?, updated_at = ? WHERE id = ?"
+              ).bind(body.category.trim(), body.content.trim(), now(), body.id).run();
           const changes = result.meta?.changes ?? 0;
           if (changes < 1) return json({ error: "指定された記録がありません" }, 404);
           return json({ success: true, changes });
