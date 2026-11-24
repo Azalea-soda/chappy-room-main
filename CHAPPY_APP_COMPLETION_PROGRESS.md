@@ -1066,3 +1066,35 @@ GitHubの `memory-admin-v1` ブランチから `worker.js` と `preview/index.ht
 - チャッピー軍団は、日々の作業で目の前の不具合やコードだけに集中しすぎず、この未来像を共通の開発目標として忘れない。
 
 最後に…緒のチャッピーは今後もどんどんバージョンアップします。
+
+
+## 26. 2026-11-24 作業記録：開発版会話画面・端末登録ページの分離
+
+### 1. 端末認証の事前確認
+- Cloudflareの開発Worker `chappy-memory-admin-test` に、ランタイム変数とシークレットとして `CHAPPY_ADMIN_PASSWORD` が存在することをユーザーが確認。値は共有していない。
+- 開発D1 `chappy-memory-test` の `device_tokens` テーブルは作成済み。列構成は `id`、`token_hash`、`created_at`、`revoked_at`、`label`。ユーザーがPRAGMA結果を確認済み。
+- まだ端末登録は実行していない。
+
+### 2. GitHub上の変更（memory-admin-v1）
+- `preview/index.html` の会話API接続先を開発Worker `https://chappy-memory-admin-test.nanami-moca.workers.dev` に変更。
+- 同ファイルの端末トークン保存キーを本番用 `chappy_device_token` から開発専用 `chappy_device_token_dev` に分離。
+- `preview/setup.html` を新規作成。開発Workerに接続し、同じ開発専用トークンキーを使用する。画面上にも開発環境専用である旨を表示。
+- 変更後にGitHubから再取得して確認：両ファイルとも開発Worker URLと開発専用トークンキーを含み、本番Worker URLを含まないことを確認。
+- `setup.html`（リポジトリ直下）と `index.html`（リポジトリ直下）は変更していない。
+- GitHubコミット：会話画面変更 `505e7ab5fa14b3a2d7b109a185ed25157ee1c74b`、開発用登録ページ追加 `4ae2fec30cc6077a9a9840cd3c8ed509ac67bc7e`。
+
+### 3. まだ実施していないこと・注意
+- Cloudflare Pagesの公開設定・ビルド出力先・ブランチ連携がこの `preview/` ディレクトリを公開しているかは未確認。したがって、ページURLを確定したり、登録ページを開くよう案内したりしない。
+- GitHubファイル変更がCloudflare Pagesへ反映されたか未確認。
+- 開発WorkerにGroqの `GROQ_API_KEY` が設定されているか、開発Workerが最新 `worker.js` をデプロイ済みか、会話ルートが実際に動くかは未確認。
+- 端末登録・D1への端末トークン登録・会話API実行・VOICEVOX再生はまだ行っていない。
+- 本番Worker・本番D1・本番用登録ページ・本番用会話画面は変更していない。
+
+### 4. 次の作業順序
+1. Cloudflare Pagesの設定を読み取り確認し、`preview/` の公開パスと自動デプロイ対象ブランチを特定する。設定変更はしない。
+2. 開発Workerの `GROQ_API_KEY` 設定有無と、開発D1 bindingを確認する。シークレット値は表示・共有しない。
+3. 開発用登録ページと会話画面が正しく公開・配信されたことを確認してから、ユーザーの操作で開発端末登録を行う。
+4. 開発D1の `device_tokens` に登録が反映されたことを確認し、開発版会話テストへ進む。
+5. 会話応答を最優先し、音声認識・Groq応答・VOICEVOX「ずんだもん・ノーマル」読み上げを個別に確認する。
+
+本番環境への変更・デプロイ・D1書き込みは引き続き禁止。必要な操作は対象と影響を事前説明し、明示承認を得る。
