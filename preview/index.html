@@ -34,7 +34,7 @@
       display: flex;
       flex-direction: column;
       justify-content: space-between;
-      background-image: url('/chappy-room-main/bg-winter.png');
+      background-image: url('/bg-winter.png');
       background-size: cover;
       background-position: center;
       background-repeat: no-repeat;
@@ -217,13 +217,13 @@
     </div>
 
     <div id="character-area">
-      <img id="chappy-image" src="/chappy-room-main/cat-default.png" alt="チャッピー">
+      <img id="chappy-image" src="/cat-default.png" alt="チャッピー">
     </div>
 
     <div id="bottom-card">
       <div id="counter-wrapper">
         <div id="counter-text-line">
-          <img id="hanamaru-icon" src="/chappy-room-main/hanamaru.png" alt="はなまる">
+          <img id="hanamaru-icon" src="/hanamaru.png" alt="はなまる">
           <span>今日</span>
           <span id="talk-count">0</span>
           <span>回お話ししたにゃ🐾</span>
@@ -231,7 +231,7 @@
       </div>
 
       <button id="mic-button" class="state-idle" onclick="handleMicClick()">
-        <img id="mic-icon-img" src="/chappy-room-main/mic-bk.png" alt="🎙️" onerror="this.style.display='none'; this.parentNode.innerText='🎙️';">
+        <img id="mic-icon-img" src="/mic-bk.png" alt="🎙️" onerror="this.style.display='none'; this.parentNode.innerText='🎙️';">
       </button>
     </div>
 
@@ -1227,9 +1227,9 @@ function speakChappyVoice(text, callback, replyShownAt) {
     function setButtonState(state) {
       micButton.className = 'state-' + state;
       if (state === 'idle') {
-        micIconImg.src = '/chappy-room-main/mic-bk.png';
+        micIconImg.src = '/mic-bk.png';
       } else {
-        micIconImg.src = '/chappy-room-main/mic-icon.png';
+        micIconImg.src = '/mic-icon.png';
       }
     }
 
