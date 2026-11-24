@@ -87,8 +87,10 @@
     <section class="panel">
       <h2 id="formTitle">記憶を追加</h2>
       <form id="recordForm">
-        <label for="category">分類</label>
-        <input id="category" maxlength="100" required placeholder="例：好きなこと、思い出、気持ち">
+        <label for="category">大分類</label>
+        <input id="category" maxlength="100" required placeholder="例：基本情報・存在">
+        <label for="drawerName">引き出し名</label>
+        <input id="drawerName" maxlength="200" required placeholder="例：チャッピーの基本">
         <label for="content">内容</label>
         <textarea id="content" maxlength="10000" required placeholder="記憶する内容"></textarea>
         <button id="saveButton" type="submit">追加する</button>
@@ -121,6 +123,7 @@
   const message = document.getElementById('message');
   const recordForm = document.getElementById('recordForm');
   const categoryInput = document.getElementById('category');
+  const drawerNameInput = document.getElementById('drawerName');
   const contentInput = document.getElementById('content');
   const recordsEl = document.getElementById('records');
   const recordSummary = document.getElementById('recordSummary');
@@ -162,6 +165,7 @@
   function resetForm() {
     editingId = null;
     recordForm.reset();
+    drawerNameInput.disabled = activeRoom === 'fixed_rules';
     formTitle.textContent = '記録を追加：' + roomNames[activeRoom];
     saveButton.textContent = '追加する';
     cancelEditButton.hidden = true;
@@ -222,7 +226,9 @@
       card.className = 'record';
       const meta = document.createElement('div');
       meta.className = 'record-meta';
-      meta.textContent = (record.id || '') + ' ／ ' + (record.category || '') + ' ／ ' + (record.status || '');
+      meta.textContent = (record.id || '') + ' ／ ' + (record.category || '') +
+        (activeRoom === 'fixed_rules' ? '' : ' ／ ' + (record.drawer_name || '引き出し未設定')) +
+        ' ／ ' + (record.status || '');
       const contentWrap = document.createElement('div');
       contentWrap.className = 'record-content-wrap';
       const body = document.createElement('div');
@@ -286,6 +292,7 @@
   function beginEdit(record) {
     editingId = record.id;
     categoryInput.value = record.category || '';
+    drawerNameInput.value = record.drawer_name || '';
     contentInput.value = record.content || '';
     formTitle.textContent = '記録を修正：' + record.id;
     saveButton.textContent = '修正を保存';
@@ -362,6 +369,7 @@
         room: activeRoom,
         id: editingId,
         category: categoryInput.value.trim(),
+        ...(activeRoom !== 'fixed_rules' ? { drawer_name: drawerNameInput.value.trim() } : {}),
         content: contentInput.value.trim()
       });
       resetForm();
@@ -398,6 +406,7 @@
   document.querySelectorAll('[data-room]').forEach(button => {
     button.addEventListener('click', async () => {
       activeRoom = button.dataset.room;
+      drawerNameInput.disabled = activeRoom === 'fixed_rules';
       document.querySelectorAll('[data-room]').forEach(item => item.setAttribute('aria-pressed', String(item === button)));
       resetForm();
       try { await loadRecords(); } catch (error) { setMessage(error.message); }
