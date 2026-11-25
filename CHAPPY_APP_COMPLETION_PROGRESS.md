@@ -1204,6 +1204,76 @@ GitHubの `memory-admin-v1` ブランチから `worker.js` と `preview/index.ht
 - その後、優先順位②の会話記憶抽出を設計・実装する。会話応答を妨げないことを最優先にする。
 - 本記録時点で、コード変更・D1書き込み・Worker変更・デプロイは行っていない。
 
+## 32. 2026-11-25 作業記録：Cloudflare GraphQLによるWorkers AI Neurons使用量の読み取り調査
+
+### 1. 今日の目的
+- Cloudflare Workers AIの無料枠・実際のNeurons消費量を確認し、GLM-4.7-Flashによる記憶抽出を追加実行する前に、無料枠でどの程度使えるか判断するための調査。
+- **この調査中、新たなAI推論は一度も実行していない。** GraphQLはAnalyticsの読み取り要求のみ。
+- 無料枠・課金状況が確認できるまでは推論を追加せず、有料化・カード登録・自動請求につながる設定変更をしない。
+
+### 2. 調査で確認できたGraphQLスキーマ
+- GraphQL endpoint：`https://api.cloudflare.com/client/v4/graphql`
+- ルート `Query` に `viewer` があり、`viewer.accounts` からアカウント情報を取得する構造。
+- `account` 型に `accountTag` と `aiInferenceAdaptiveGroups` が存在することを確認。
+- `aiInferenceAdaptiveGroups` の引数：
+  - `filter`：必須の `AccountAiInferenceAdaptiveGroupsFilter_InputObject`
+  - `limit)：必須の `uint64`
+  - `orderBy)：順序指定のenumリスト
+- Filter入力に `date`、`date_geq`、`date_leq`、`datetime`、`modelId`、`neurons`、`requestSource`、`errorCode`、`inferenceTimeMs` 等がある。
+- 戻り値の `AccountAiInferenceAdaptiveGroups` に `count`、`dimensions`、`sum` 等がある。
+- `dimensions` に `date`、`datetime`、`modelId`、`neurons)、`requestSource` 等がある。
+- `sum` に `totalNeurons`、`totalInferenceSteps`、`totalInferenceTimeMs`、`totalInputTokens`、`totalOutputTokens` 等がある。
+- orderBy enumに `date_ASC`、`date_DESC`、`modelId_ASC`、`modelId_DESC`、`sum_totalNeurons_ASC`、`sum_totalNeurons_DESC` 等がある。
+- 以上から、Neurons集計に使うデータセットと必要な集計フィールドはスキーマ上で確認できた。ただし、**実際の使用量データ取得はまだ成功していない。**
+
+### 3. PowerShell環境・変数の注意
+- PowerShell：5.1.26100.9444。
+- この環境では `Invoke-RestMethod` と `ConvertFrom-Json` が不思議なPS 5.1 constructorエラーで失敗するため、今後この調査では避ける。
+- `.NET HttpClient` によるHTTP要求は成功している。
+- `$CF_TOKEN`：Account Analytics Read用トークン。
+- `$aiTokenPlain`：Workers AI Read用トークン。上記とは別のトークン。
+- `$analyticsClient`：`$CF_TOKEN` を使うAnalytics用HttpClient。
+- `$client`：Workers AI Readトークンを使う既存HttpClient。
+- **2つのクライアント・トークンを混同しない。** 特に `$client` をAnalyticsトークンで上書きしない。
+- GraphQLのスキーマ調査（introspection）は `$analyticsClient` でHTTP 200 / OKを確認できた。
+- Workers AI Readトークンで `/tokens/verify` が401になった過去結果だけをもって、そのトークンが無効とは断定しない。
+
+### 4. 実際の使用量取得要求と結果
+2026-11-25、次の読み取り専用GraphQL要求を送信した。
+
+```powershell
+$body='{"query":"{ viewer { accounts { accountTag aiInferenceAdaptiveGroups(filter: {date_geq: \"2026-11-19\", date_leq: \"2026-11-19\"}, limit: 100, orderBy: [date_ASC]) { dimensions { date modelId } sum { totalNeurons } } } } }"}'; $content=[System.Net.Http.StringContent]::new($body,[System.Text.Encoding]::UTF8,"application/json"); $usageRaw=$analyticsClient.PostAsync("https://api.cloudflare.com/client/v4/graphql",$content).Result.Content.ReadAsStringAsync().Result; $usageRaw
+```
+
+返却内容：
+```json
+{"data":null,"errors":[{"message":"not authorized for that account","path":null,"extensions":{"code":"authz","timestamp":"2026-11-25T15:18:11.038291613Z","ray_id":"a6019fde6ac749f9-SEA"}}]}
+```
+
+- HTTP要求はGraphQL endpointへ到達したが、データは返らず、Cloudflareから `authz` / `not authorized for that account` が返った。
+- したがって、**2026-11-19のNeurons使用量は取得できていない。** クエリ成功・集計完了とは扱わない。
+- 原因は未確定。Analyticsトークンの権限範囲、対象アカウントの指定範囲、ログインユーザー／トークンと対象アカウントの関係などを切り分ける必要がある。単に「権限不足」と決めつけない。
+
+### 5. 次回の最初の作業
+1. Cloudflare Dashboardで、既存のAccount Analytics Readトークンの権限と、対象アカウントへのリソース範囲を**画面上で読み取り確認**する。新しいトークンを作成したり、既存権限を変更したりしない。
+2. 対象アカウント範囲が正しいか確認できた後、必要なら最小の読み取りクエリ `{ viewer { accounts { accountTag } } }` で、アカウント一覧取得自体が許可されるかを切り分ける。実行前に目的と影響を説明する。
+3. 認可問題が解決してから、対象日のNeurons集計を再試行する。推論は実行しない。
+4. 使用量が確認できたら、過去の承認済みテスト履歴（11月19日の最大50 Neuronsまでのテスト、過去6回の平均約5.63 Neurons／範囲約3.9362〜7.1505 Neurons）と区別して、実測値・集計期間・単位を記録する。過去6回の平均は参考値であり、今回のGraphQL集計結果ではない。
+5. 無料枠での実利用時間・会話量を評価するまでは、GLM記憶抽出の追加推論を行わない。会話応答が記憶抽出により遅延・阻害される設計にしない。
+
+### 6. 安全確認・変更していないもの
+- 新しいAI推論：実行なし。今回のGraphQL要求はAnalyticsの読み取りのみ。
+- APIトークンの新規作成・権限変更：なし。
+- 課金設定・支払方法・カード登録：変更なし。
+- Worker、アプリコード、D1、Pages、デプロイ：変更なし。
+- トークン値や秘密情報は、このプロジェクトシートにも記録しない。
+- 作業対象はCloudflare Analyticsの読み取り調査であり、チャッピー本体の会話機能・音声機能には変更なし。
+
+### 7. 次回担当への共有
+この作業の目的は、単にGraphQLを動かすことではなく、**無料利用で安全に確保できる会話量を実測し、記憶抽出が母との会話を圧迫しない設計判断をすること**。同じスキーマintrospectionを最初から繰り返さず、上記の認可エラーの切り分けから再開する。ユーザーにトークン値・アカウントID等の秘密情報をチャットへ貼らせない。
+
+---
+
 # 最後に…
 
 (この「最後に」は必ず文末に固定。進捗はこの上に記入すること)
