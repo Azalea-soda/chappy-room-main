@@ -162,6 +162,42 @@
       vertical-align: baseline;
     }
 
+    #memory-test-panel {
+      width: 100%;
+      max-width: 520px;
+      padding: 10px 12px;
+      border: 1px solid #d8d8e8;
+      border-radius: 12px;
+      background: #f5f5fb;
+      color: #24243a;
+      font-size: 0.78rem;
+      line-height: 1.45;
+    }
+    #memory-test-button {
+      margin-top: 7px;
+      padding: 8px 14px;
+      border: 0;
+      border-radius: 8px;
+      background: #4b568c;
+      color: white;
+      font-size: 0.85rem;
+      cursor: pointer;
+    }
+    #memory-test-button:disabled { opacity: 0.55; cursor: wait; }
+    #memory-test-result {
+      display: none;
+      max-height: 180px;
+      overflow: auto;
+      margin-top: 8px;
+      padding: 8px;
+      border-radius: 8px;
+      background: #fff;
+      white-space: pre-wrap;
+      overflow-wrap: anywhere;
+      user-select: text;
+      -webkit-user-select: text;
+    }
+
     #mic-button {
       width: 72px;
       height: 72px;
@@ -233,6 +269,12 @@
       <button id="mic-button" class="state-idle" onclick="handleMicClick()">
         <img id="mic-icon-img" src="/mic-bk.png" alt="🎙️" onerror="this.style.display='none'; this.parentNode.innerText='🎙️';">
       </button>
+
+      <div id="memory-test-panel">
+        <div><strong>開発テスト：</strong>GLM記憶抽出（練習用の文章・保存なし）</div>
+        <button id="memory-test-button" type="button" onclick="runMemoryExtractionTest()">記憶抽出テストを実行</button>
+        <pre id="memory-test-result" aria-live="polite"></pre>
+      </div>
     </div>
 
   </div>
@@ -1263,6 +1305,54 @@ function speakChappyVoice(text, callback, replyShownAt) {
         top: chatScrollArea.scrollHeight,
         behavior: 'smooth'
       });
+    }
+
+    // GLM記憶抽出の手動テスト。固定の練習文のみを送り、D1への保存は行わない。
+    async function runMemoryExtractionTest() {
+      const button = document.getElementById('memory-test-button');
+      const output = document.getElementById('memory-test-result');
+      const deviceToken = localStorage.getItem(TOKEN_KEY);
+      output.style.display = 'block';
+      output.textContent = '';
+      if (!deviceToken) {
+        output.textContent = '端末登録が見つからないにゃ。登録済みのパソコン画面で開いているか確認してね。';
+        return;
+      }
+
+      button.disabled = true;
+      button.textContent = 'テスト中…';
+      output.textContent = '練習用の文章をGLMに送っているよ。少し待ってね。';
+      const sampleConversation = '（テスト用の架空の会話）今日は初めて近所の公園まで散歩したよ。桜が咲いていて、とても嬉しかった。また行きたいな。';
+      try {
+        const response = await fetch(API_URL + '/memory-extract-test', {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json; charset=utf-8',
+            'Authorization': 'Bearer ' + deviceToken
+          },
+          body: JSON.stringify({ conversation: sampleConversation })
+        });
+        const data = await response.json();
+        if (!response.ok) {
+          output.textContent = 'テスト結果：エラー（HTTP ' + response.status + '）\\n' +
+            (data.error || '詳細を確認できませんでした') +
+            (data.detail ? '\\n詳細：' + data.detail : '') +
+            '\\n\\nD1への保存：なし';
+          return;
+        }
+        output.textContent =
+          'テスト結果：' + (data.modelCalled ? 'GLM呼び出し成功' : 'GLM未呼び出し') + '\\n' +
+          'モデル：' + (data.model || '不明') + '\\n' +
+          '固定ルール：' + (data.contextCounts?.fixedRules ?? '不明') + '件\\n' +
+          '既存記憶：' + (data.contextCounts?.memories ?? '不明') + '件\\n' +
+          'D1への保存：' + (data.d1WritePerformed === false ? 'なし（保存していない）' : '確認が必要') + '\\n\\n' +
+          'GLMの抽出結果：\\n' + (data.resultText || '結果テキストがありません');
+      } catch (error) {
+        output.textContent = '通信エラー：' + (error.message || error) + '\\nD1への保存：なし';
+      } finally {
+        button.disabled = false;
+        button.textContent = 'もう一度テストする';
+      }
     }
 
     // ページ表示直後にD1の知識を先読みし、最初の会話での待ち時間を減らす
