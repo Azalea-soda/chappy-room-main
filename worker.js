@@ -436,7 +436,7 @@ export default {
           model: "@cf/zai-org/glm-4.7-flash",
           modelCalled: false,
           d1WritePerformed: false,
-          contextCounts: { fixedRules: fixedRules.length, memories: memories.length },
+          contextCounts: { fixedRules: fixedRules.length, chappyProfile: chappyProfile.length, memories: memories.length },
           systemPrompt,
           userPrompt
         });
