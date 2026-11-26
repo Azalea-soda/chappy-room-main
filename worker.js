@@ -357,15 +357,19 @@ export default {
           return json({ error: "記憶抽出の対象となる会話文がありません（12,000文字以内）" }, 400);
         }
 
-        const [rulesResult, memoriesResult] = await Promise.all([
+        const [rulesResult, profileResult, memoriesResult] = await Promise.all([
           env.DB.prepare(
             "SELECT id, category, content FROM fixed_rules WHERE status = '継続中' ORDER BY created_at ASC"
+          ).all(),
+          env.DB.prepare(
+            "SELECT id, category, drawer_name, content FROM chappy_profile WHERE status = '継続中' ORDER BY category ASC, drawer_name ASC, created_at ASC"
           ).all(),
           env.DB.prepare(
             "SELECT id, category, drawer_name, content FROM mother_memories WHERE status = '継続中' ORDER BY category ASC, drawer_name ASC, created_at ASC"
           ).all()
         ]);
         const fixedRules = rulesResult.results || [];
+        const chappyProfile = profileResult.results || [];
         const memories = memoriesResult.results || [];
 
         const systemPrompt = [
@@ -381,9 +385,11 @@ export default {
         ].join("\n");
 
         const userPrompt = [
-          "【D1固定ルール】",
+          "【チャッピーの固定ルール（基本方針・判断基準）】",
           JSON.stringify(fixedRules),
-          "【現在の既存記憶】",
+          "【チャッピー自身のプロフィール】",
+          JSON.stringify(chappyProfile),
+          "【お母さんについての既存記憶】",
           JSON.stringify(memories),
           "【今回のお母さんの会話】",
           body.conversation
@@ -411,7 +417,7 @@ export default {
               model: "@cf/zai-org/glm-4.7-flash",
               modelCalled: true,
               d1WritePerformed: false,
-              contextCounts: { fixedRules: fixedRules.length, memories: memories.length },
+              contextCounts: { fixedRules: fixedRules.length, chappyProfile: chappyProfile.length, memories: memories.length },
               resultText
             });
           } catch (error) {
