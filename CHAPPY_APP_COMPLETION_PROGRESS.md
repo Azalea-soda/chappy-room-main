@@ -1339,6 +1339,51 @@ $body='{"query":"{ viewer { accounts { accountTag aiInferenceAdaptiveGroups(filt
 - Worker、アプリコード、D1、Pages、デプロイ：変更なし。
 - 実際のアカウントID、トークン値、その他の秘密情報は記録しない。
 
+
+## 35. 2026-11-27 作業記録：Cloudflare Worker現行コードとGitHub最新版の確認
+
+### 1. 今日の目的
+- GitHubの `memory-admin-v1` ブランチにある最新の `worker.js` を、Cloudflareの `chappy-memory-admin-test` Workerへ安全に反映する方法を確認する。
+- 既存の会話・管理・端末登録などの機能を失わないよう、上書き前にCloudflare側の現在のコードを確認する。
+
+### 2. Cloudflare側で確認した内容
+- Cloudflare Dashboardの Workers & Pages から、対象Worker `chappy-memory-admin-test` のコード編集画面を開いた。
+- コードを変更・保存・デプロイする前に、画面に表示されたコード全体をコピーし、この会話内で確認した。
+- コピーされたコードは、`var __defProp` などから始まる変換・バンドル済みの形式で、GitHub上のソースコードとは見た目が異なる。
+- 貼り付けられたコードには、管理者ログイン、管理レコード操作、端末登録・認証、母の記憶／チャッピープロフィール／固定ルールの取得、Groqを使う `/chat` などの処理が含まれていた。
+
+### 3. GitHub最新版との照合で確認できたこと
+- GitHubの `memory-admin-v1/worker.js` を再取得して確認した。取得時のBlob SHA：`f1178f0c3b26f232854003d05fd4ef8671c6752f`。
+- Cloudflare側のコピーとGitHub最新版の両方に、記憶抽出のための次の3テーブルの読み込み処理が存在する。
+  - `fixed_rules`
+  - `chappy_profile`
+  - `mother_memories`
+- 両方に `/memory-extract-preview` と `/memory-extract-test` の処理があり、3種類それぞれの件数を `contextCounts` に返す処理も確認できた。
+- したがって、今回反映しようとしていた「3種類のD1データを記憶抽出時のコンテキストとして読み込む」変更は、Cloudflare側のコードにもすでに含まれていることを確認した。
+- ただし、Cloudflare側は変換済みコード、GitHub側はソースコードであり、全行の完全な差分比較や、実際に稼働中のデプロイ版との一致までは確認していない。今回確認できたのは上記の主要機能・処理の存在であり、両者が完全に同一とは断定しない。
+
+### 4. 今回の判断・変更していないもの
+- GitHub最新版をCloudflareへ丸ごと貼り替える操作は中止した。現行コードに既存機能が含まれているため、不要な上書きを避けた。
+- Cloudflareのコード編集・保存・デプロイ：なし。
+- Workerの削除・新規作成：なし。
+- D1データ・テーブル：変更なし。
+- Workers AI／D1バインディング、環境変数、Secrets：変更なし。
+- 本番Worker `super-violet-bc7e` と本番D1 `chappy-memory`：変更なし。
+- GitHubの `worker.js` およびプロジェクトシート以外のアプリコード：変更なし。
+
+### 5. 次回の最初の作業
+1. GLM-4.7-Flashの返答を安全に取り出す処理を確認・改善する。
+2. 現在のコードでは、`inference.response` が文字列でない場合に推論結果オブジェクト全体を `JSON.stringify` する実装が残っている。これではreasoning等の内部情報を結果欄へ出すおそれがあるため、最終回答本文だけを取得し、内部reasoningを表示しないようにする。
+3. 以前のテストでは `max_tokens: 2048` に達し、`finish_reason: "length"`、`choices[0].message.content: null` となった。モデルの最終回答が空になる問題は未解決として扱う。
+4. 修正後もまずはプレビュー／テスト専用で確認し、D1への自動保存は行わない。会話機能を優先し、無料枠を確認せず追加推論を増やさない。
+5. Cloudflareへの反映が必要になった場合は、対象Workerが `chappy-memory-admin-test` であること、既存バインディングとSecretsを維持することを確認してから行う。
+
+### 6. 次回担当への共有
+- 今回のCloudflareコード確認と3テーブル読み込み確認を、最初からやり直さない。
+- GitHub最新版をCloudflareへ丸ごと貼り替える必要があるとは、現時点では判断しない。
+- 次はGLMの最終回答本文の取り出しと、2048トークンで最終回答が空になった問題の改善から再開する。
+- ユーザーはローカルにリポジトリを置いて作業しておらず、GitHubウェブ画面とCloudflare Dashboardを使っている。PowerShellやローカル環境を前提に案内しない。
+
 ---
 
 # 最後に…
