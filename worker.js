@@ -350,6 +350,56 @@ export default {
         return json({ error: "不明な操作です" }, 400);
       };
 
+      // Memory extraction prompt preview only. This route does not call Workers AI or write to D1.
+      if (path === "/memory-extract-preview") {
+        if (!validText(body.conversation, 12000)) {
+          return json({ error: "記憶抽出の対象となる会話文がありません（12,000文字以内）" }, 400);
+        }
+
+        const [rulesResult, memoriesResult] = await Promise.all([
+          env.DB.prepare(
+            "SELECT id, category, content FROM fixed_rules WHERE status = '継続中' ORDER BY created_at ASC"
+          ).all(),
+          env.DB.prepare(
+            "SELECT id, category, drawer_name, content FROM mother_memories WHERE status = '継続中' ORDER BY category ASC, drawer_name ASC, created_at ASC"
+          ).all()
+        ]);
+        const fixedRules = rulesResult.results || [];
+        const memories = memoriesResult.results || [];
+
+        const systemPrompt = [
+          "あなたは会話内容から、お母さんについて長く役立つ記憶候補を抽出する補助AIです。",
+          "最優先ルール：会話の文脈と本人の気持ち・感情を大切にし、推測で事実を補わないこと。",
+          "以下のD1固定ルールが記憶対象・分類・引き出し名の判断基準です。固定ルールを必ず読み、そこにない分類や引き出し名を勝手に作らないでください。",
+          "既存記憶と照合し、候補を new（新規）, add（既存記憶への追加）, correction（訂正・更新）, duplicate（重複）, confirm（既存内容の再確認）に分類してください。",
+          "訂正では最新の本人の明確な発言を優先し、古い記憶を黙って消さず、どの記録をどう更新する候補か示してください。",
+          "会話に出た重要な出来事や初めての体験は、その出来事だけでなく、その時のお母さんの気持ち・感情も候補に含めてください。",
+          "雑談の一時的な内容、チャッピーの発言、音声認識の誤りと疑われる語句を事実として登録しないでください。",
+          "出力はJSONのみ。形式は {\"candidates\":[{\"type\":\"new|add|correction|duplicate|confirm\",\"category\":\"D1固定ルールに沿った大分類\",\"drawer_name\":\"既存または固定ルールに合う引き出し名\",\"content\":\"記憶内容。気持ち・感情を含める\",\"target_id\":null,\"reason\":\"短い判断理由\"}]}。該当なしなら {\"candidates\":[]}。",
+          "まだ保存処理は行いません。候補を提案するだけです。"
+        ].join("\n");
+
+        const userPrompt = [
+          "【D1固定ルール】",
+          JSON.stringify(fixedRules),
+          "【現在の既存記憶】",
+          JSON.stringify(memories),
+          "【今回のお母さんの会話】",
+          body.conversation
+        ].join("\n\n");
+
+        return json({
+          success: true,
+          previewOnly: true,
+          model: "@cf/zai-org/glm-4.7-flash",
+          modelCalled: false,
+          d1WritePerformed: false,
+          contextCounts: { fixedRules: fixedRules.length, memories: memories.length },
+          systemPrompt,
+          userPrompt
+        });
+      }
+
       if (path === "/memories") {
         return await handleRecords("mother_memories", "mother", "memories");
       }
