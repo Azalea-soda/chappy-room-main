@@ -7,5 +7,5 @@ binding = "DB"
 database_name = "chappy-memory-test"
 database_id = "fd96a54a-d13e-4c8f-bc62-7afffea55182"
 
-[[ai]]
+[ai]
 binding = "AI"
