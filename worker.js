@@ -351,7 +351,8 @@ export default {
       };
 
       // Memory extraction prompt preview only. This route does not call Workers AI or write to D1.
-      if (path === "/memory-extract-preview") {
+      if (path === "/memory-extract-preview" || path === "/memory-extract-test") {
+        const runModel = path === "/memory-extract-test";
         if (!validText(body.conversation, 12000)) {
           return json({ error: "記憶抽出の対象となる会話文がありません（12,000文字以内）" }, 400);
         }
@@ -387,6 +388,41 @@ export default {
           "【今回のお母さんの会話】",
           body.conversation
         ].join("\n\n");
+
+        if (runModel) {
+          if (!env.AI || typeof env.AI.run !== "function") {
+            return json({ error: "Workers AI binding（AI）が利用できません。推論は実行していません", modelCalled: false, d1WritePerformed: false }, 503);
+          }
+          try {
+            const inference = await env.AI.run("@cf/zai-org/glm-4.7-flash", {
+              messages: [
+                { role: "system", content: systemPrompt },
+                { role: "user", content: userPrompt }
+              ],
+              max_tokens: 2048,
+              temperature: 0.1
+            });
+            const resultText = typeof inference?.response === "string"
+              ? inference.response
+              : JSON.stringify(inference);
+            return json({
+              success: true,
+              previewOnly: true,
+              model: "@cf/zai-org/glm-4.7-flash",
+              modelCalled: true,
+              d1WritePerformed: false,
+              contextCounts: { fixedRules: fixedRules.length, memories: memories.length },
+              resultText
+            });
+          } catch (error) {
+            return json({
+              error: "GLMの推論に失敗しました。自動再試行は行っていません",
+              detail: String(error?.message || error).slice(0, 500),
+              modelCalled: true,
+              d1WritePerformed: false
+            }, 502);
+          }
+        }
 
         return json({
           success: true,
