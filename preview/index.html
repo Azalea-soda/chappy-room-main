@@ -1344,7 +1344,8 @@ function speakChappyVoice(text, callback, replyShownAt) {
           'テスト結果：' + (data.modelCalled ? 'GLM呼び出し成功' : 'GLM未呼び出し') + '\\n' +
           'モデル：' + (data.model || '不明') + '\\n' +
           '固定ルール：' + (data.contextCounts?.fixedRules ?? '不明') + '件\\n' +
-          '既存記憶：' + (data.contextCounts?.memories ?? '不明') + '件\\n' +
+          'チャッピープロフィール：' + (data.contextCounts?.chappyProfile ?? '不明') + '件\\n' +
+          'お母さんの既存記憶：' + (data.contextCounts?.memories ?? '不明') + '件\\n' +
           'D1への保存：' + (data.d1WritePerformed === false ? 'なし（保存していない）' : '確認が必要') + '\\n\\n' +
           'GLMの抽出結果：\\n' + (data.resultText || '結果テキストがありません');
       } catch (error) {
