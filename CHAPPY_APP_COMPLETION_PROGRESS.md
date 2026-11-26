@@ -298,7 +298,6 @@ SELECT name FROM sqlite_master WHERE type = 'table' ORDER BY name;
 | `mother_memories` |
 
 コンソール表示：応答時間 761ミリ秒、クエリー時間 0.45ミリ秒。
-
 ### 重要な区別・再確認禁止
 
 - これは**本番D1 `chappy-memory`** の結果であり、テストD1 `chappy-memory-test` の結果ではない。
@@ -598,7 +597,6 @@ GitHubの変更履歴とソースの読み取りのみ。アプリコード、Wo
 1. 2026-11-24の作業③（開発環境のデータ保存場所・構造の確認）を、ユーザーが実行する読み取り専用SQLの結果を受け取って続行する。
 2. 記憶システムの設計・実装を優先し、先読み方式と4秒の壁は保留一覧に残す。
 3. アプリの主要機能が形になった後、完成前の最終検証で本項目を必ず再開する。
-
 ---
 
 
@@ -897,7 +895,6 @@ https://github.com/Azalea-soda/chappy-room-main/blob/memory-admin-v1/preview/adm
 - API接続先は開発用Worker chappy-memory-admin-test。今回、管理画面へのログインやデータ操作は実施していない。
 
 ### 5. 現時点で分かった修正対象と未確認事項
-
 引き出し名を実際に利用するには、少なくとも次の3か所の整合が必要：
 1. D1：引き出し名を保存できるデータ構造
 2. Worker：引き出し名を含む読み書き・一覧取得
@@ -1198,7 +1195,6 @@ GitHubの `memory-admin-v1` ブランチから `worker.js` と `preview/index.ht
 2. **会話からの記憶抽出**：お母さんとの会話から大切な記憶を抽出し、新規・訂正・追加・重複・要確認を判定する。手入力記憶と同じ管理方式・データ形式・共通M番号体系で登録する。会話応答を最優先し、抽出処理が遅延・妨害・無料枠圧迫を起こす可能性があれば抽出をスキップする。
 3. **必要機能の完成**：記憶管理画面など、完成に必要な機能を仕上げる。
 4. **最後に名称・URL等を整理**：TEST／テスト用の名称や参照を、影響調査と安全な移行手順に基づいて整理する。
-
 ### 4. 次の作業
 - 優先順位①の残り（固定ルール・Cプロフィールの反映）を必要最小限で確認する。
 - その後、優先順位②の会話記憶抽出を設計・実装する。会話応答を妨げないことを最優先にする。
@@ -1271,6 +1267,43 @@ $body='{"query":"{ viewer { accounts { accountTag aiInferenceAdaptiveGroups(filt
 
 ### 7. 次回担当への共有
 この作業の目的は、単にGraphQLを動かすことではなく、**無料利用で安全に確保できる会話量を実測し、記憶抽出が母との会話を圧迫しない設計判断をすること**。同じスキーマintrospectionを最初から繰り返さず、上記の認可エラーの切り分けから再開する。ユーザーにトークン値・アカウントID等の秘密情報をチャットへ貼らせない。
+
+
+## 33. 2026-11-26 作業記録：Cloudflare GraphQLのアカウント指定取得に成功
+
+### 1. 今日確認したこと
+- Cloudflare Account API Tokenの確認エンドポイント `/accounts/{accountId}/tokens/verify` を、既存のAnalytics用 `$analyticsClient` で読み取り確認。
+- HTTP応答：`OK`。返却されたトークン状態：`active`。既存トークンが有効であることを確認した。
+- Cloudflare Dashboardで確認した既存トークンの権限は `Account Analytics Read`。対象アカウント名もDashboard上で一致していることを、ユーザーが前段で確認済み。
+- ユーザーのブラウザURLからアカウントIDをローカルのPowerShell変数 `$accountId` に直接入力。文字数は `32`。
+- GraphQLのアカウント一覧を取得する問い合わせ `{ viewer { accounts { accountTag } } }` は、以前 `not authorized for that account` で失敗していた。
+- 今回、対象アカウントIDを指定する形で `viewer.accounts(filter: { accountTag: ... })` を問い合わせたところ、HTTP応答 `OK`、`$j.errors.Count` は `0`、取得アカウント数は `1`、取得した `accountTag` と `$accountId` の比較結果は `True`。
+- したがって、**対象アカウントを明示したGraphQLのアカウント情報取得には成功した**。一方、アカウント指定なしの一覧取得で出た認可エラーの原因は未確定のまま。
+
+### 2. 今回の結果の正しい解釈
+- トークンは `active` であり、対象アカウントを指定したGraphQL問い合わせも成功した。
+- これは、Analytics用トークンで対象アカウントの情報を取得できることを示す。
+- ただし、**2026-11-19のWorkers AI Neurons使用量を取得できたわけではない**。Neurons集計クエリはまだ成功確認していない。
+- 以前の「not authorized for that account」は、アカウント指定なしの問い合わせで発生した過去の結果として残す。今回の成功を理由に過去の記録を削除・書き換えない。
+
+### 3. 次回の最初の作業
+1. 今回成功したアカウント指定の形式を使い、`viewer.accounts(filter: { accountTag: "$accountId" })` の中で `aiInferenceAdaptiveGroups` を呼び出す読み取り専用GraphQLクエリを作成する。
+2. 対象日を `2026-11-19` に限定し、`dimensions { date modelId }` と `sum { totalNeurons }` を取得する。
+3. 返却された `modelId` がGLM-4.7-Flashであることを確認してから、対象日の `totalNeurons` を記録する。モデルが一致しない場合はGLM分として扱わない。
+4. 実測値が取得できるまでは、無料枠の実利用可能量を確定せず、追加のAI推論・記憶抽出を実行しない。
+
+### 4. 安全確認・変更していないもの
+- 実施したのはCloudflareトークン状態確認とGraphQLの読み取り要求のみ。
+- APIトークンの新規作成・権限変更：なし。
+- 課金設定・支払方法・カード登録：変更なし。
+- Worker、アプリコード、D1、Pages、デプロイ：変更なし。
+- AI推論・GLM記憶抽出：実行なし。
+- トークン値・アカウントIDそのものは記録しない。PowerShell上でIDが見える場合も、チャットや作業記録へ貼り付けない。
+
+### 5. 次回担当への共有
+- Cloudflare GraphQLスキーマintrospectionを繰り返さない。
+- トークンの有効性確認と対象アカウント指定のGraphQL取得は成功済み。ユーザーに同じ確認をやり直してもらわない。
+- 次は、今回成功したアカウント指定の問い合わせにNeurons集計を追加するところから再開する。
 
 ---
 
