@@ -99,6 +99,12 @@
     </section>
 
     <section class="panel">
+      <h2>会話から届いた記憶候補</h2>
+      <p class="muted">会話中に自動抽出された候補だよ。ここで確認して承認するまでD1には保存されないよ。</p>
+      <div id="pendingCandidates"></div>
+    </section>
+
+    <section class="panel">
       <h2>保存されている記録</h2>
       <div id="recordSummary" class="record-summary" aria-live="polite"></div>
       <button id="refreshButton" class="secondary" type="button">一覧を更新</button>
@@ -116,6 +122,8 @@
   // 接続先を設定する際も、本番Worker URLは絶対に指定しない。
   const API_URL = 'https://chappy-memory-admin-test.nanami-moca.workers.dev';
   const TOKEN_KEY = 'chappy_admin_session';
+  const PENDING_KEY = 'chappy_memory_candidates_dev';
+  const pendingCandidatesEl = document.getElementById('pendingCandidates');
   const loginPanel = document.getElementById('loginPanel');
   const manager = document.getElementById('manager');
   const loginForm = document.getElementById('loginForm');
@@ -187,6 +195,96 @@
     }
     return data;
   }
+  function readPendingCandidates() {
+    try {
+      const value = JSON.parse(localStorage.getItem(PENDING_KEY) || '[]');
+      return Array.isArray(value) ? value : [];
+    } catch (error) { return []; }
+  }
+  function renderPendingCandidates() {
+    const pending = readPendingCandidates();
+    pendingCandidatesEl.replaceChildren();
+    if (!pending.length) {
+      const empty = document.createElement('p');
+      empty.className = 'muted';
+      empty.textContent = '未確認の候補はまだないよ。チャッピーとの会話後にここへ届くよ。';
+      pendingCandidatesEl.append(empty);
+      return;
+    }
+    pending.forEach((candidate, index) => {
+      const card = document.createElement('article');
+      card.className = 'record';
+      const meta = document.createElement('div');
+      meta.className = 'record-meta';
+      const typeNames = { new: '新規', add: '既存記憶へ追加', correction: '訂正候補', duplicate: '重複候補', confirm: '再確認候補' };
+      meta.textContent = (typeNames[candidate.type] || candidate.type) + ' ／ ' +
+        (candidate.category || '') + ' ／ ' + (candidate.drawer_name || '');
+      const body = document.createElement('p');
+      body.className = 'record-content';
+      body.textContent = candidate.content || '';
+      const reason = document.createElement('p');
+      reason.className = 'muted';
+      reason.textContent = candidate.reason || '';
+      const actions = document.createElement('div');
+      actions.className = 'record-actions';
+      const approve = makeButton(candidate.type === 'new' ? '新しい記憶として保存' :
+        candidate.type === 'add' ? '既存記憶に追記' :
+        candidate.type === 'correction' ? '訂正内容に更新' : '確認済みにする', '', async () => {
+          await approveCandidate(index, candidate);
+        });
+      const reject = makeButton('候補を却下', 'secondary', () => {
+        const latest = readPendingCandidates();
+        latest.splice(index, 1);
+        localStorage.setItem(PENDING_KEY, JSON.stringify(latest));
+        renderPendingCandidates();
+        setMessage('候補を却下したよ。D1の記録は変更していないよ。');
+      });
+      actions.append(approve, reject);
+      card.append(meta, body, reason, actions);
+      pendingCandidatesEl.append(card);
+    });
+  }
+  async function approveCandidate(index, candidate) {
+    if (activeRoom !== 'mother_memories') {
+      setMessage('会話の記憶候補を保存するには「M：お母さん」タブを選んでね。');
+      return;
+    }
+    try {
+      if (candidate.type === 'new') {
+        await api('/admin/records', {
+          action: 'create', room: 'mother_memories',
+          category: candidate.category, drawer_name: candidate.drawer_name, content: candidate.content
+        });
+      } else if (candidate.type === 'add' || candidate.type === 'correction') {
+        const target = currentRecords.find(record => record.id === candidate.target_id);
+        if (!target) {
+          setMessage('対象の既存記憶が見つからないよ。一覧を更新して確認してね。');
+          return;
+        }
+        if (candidate.type === 'add') {
+          await api('/admin/records', {
+            action: 'append', room: 'mother_memories', id: target.id, content: candidate.content
+          });
+        } else {
+          if (!window.confirm('既存の内容を候補の文章に置き換えるよ。元の内容は上書きされるけど、いい？')) return;
+          await api('/admin/records', {
+            action: 'update', room: 'mother_memories', id: target.id,
+            category: target.category, drawer_name: target.drawer_name, content: candidate.content
+          });
+        }
+      } else {
+        setMessage('この候補は自動保存の対象外だよ。確認してから候補を閉じてね。');
+        return;
+      }
+      const latest = readPendingCandidates();
+      latest.splice(index, 1);
+      localStorage.setItem(PENDING_KEY, JSON.stringify(latest));
+      renderPendingCandidates();
+      await loadRecords();
+      setMessage('承認した記憶を開発用D1に保存したよ。');
+    } catch (error) { setMessage(error.message); }
+  }
+
   async function loadRecords() {
     setMessage('記録を読み込んでいるよ…');
     recordsEl.replaceChildren();
@@ -413,8 +511,13 @@
     });
   });
 
+  renderPendingCandidates();
+  window.addEventListener('storage', (event) => {
+    if (event.key === PENDING_KEY) renderPendingCandidates();
+  });
   if (adminToken) {
     showManager();
+    renderPendingCandidates();
     loadRecords().catch(error => setMessage(error.message));
   }
 })();
