@@ -297,6 +297,10 @@
     let sessionUserTexts = [];
     // このページを開いている間だけ、実際の会話を記憶抽出テスト用に保持する（保存しない）。
     let extractionConversation = [];
+    let lastExtractedConversationLength = 0;
+    let extractionTimer = null;
+    let extractionInFlight = false;
+    const EXTRACTION_PENDING_KEY = 'chappy_memory_candidates_dev';
     let recognitionError = null;
     let finishTimer = null;
     let responseStarted = false;
@@ -464,6 +468,10 @@
       if (!recognition) return;
 
       if (currentState === 'idle') {
+        if (extractionTimer) {
+          clearTimeout(extractionTimer);
+          extractionTimer = null;
+        }
         sessionUserTexts = [];
         recognitionError = null;
         responseStarted = false;
@@ -999,6 +1007,7 @@
         extractionConversation.push('チャッピー: ' + accumulatedText.trim());
         currentState = 'idle';
         setButtonState('idle');
+        scheduleMemoryExtraction();
 
       } catch (error) {
         if (requestGeneration !== responseGeneration) return;
@@ -1313,8 +1322,58 @@ function speakChappyVoice(text, callback, replyShownAt) {
       });
     }
 
-    // 実際のマイク会話をGLMに渡す手動テスト。会話はページ内だけに保持し、D1には保存しない。
-    async function runMemoryExtractionTest() {
+    // 会話が45秒間ひと段落したら、直近の新しい会話だけを裏側で抽出する。
+    // 抽出はチャッピーの返答・音声再生を待たせず、失敗時の自動再試行もしない。
+    function scheduleMemoryExtraction() {
+      if (extractionTimer) clearTimeout(extractionTimer);
+      extractionTimer = setTimeout(() => {
+        extractionTimer = null;
+        if (currentState !== 'idle' || extractionInFlight) return;
+        runMemoryExtractionTest(true).catch(error => {
+          console.warn('[記憶抽出] 会話を妨げず終了しました:', error);
+        });
+      }, 45000);
+    }
+
+    function savePendingMemoryCandidates(candidates) {
+      if (!Array.isArray(candidates) || !candidates.length) return 0;
+      let pending = [];
+      try {
+        const stored = JSON.parse(localStorage.getItem(EXTRACTION_PENDING_KEY) || '[]');
+        if (Array.isArray(stored)) pending = stored;
+      } catch (error) {}
+      let added = 0;
+      for (const candidate of candidates) {
+        if (!candidate || !['new', 'add', 'correction', 'duplicate', 'confirm'].includes(candidate.type)) continue;
+        if (typeof candidate.category !== 'string' || typeof candidate.drawer_name !== 'string' ||
+            typeof candidate.content !== 'string' || !candidate.content.trim()) continue;
+        if (/ここに|未設定|仮の|placeholder/i.test(candidate.drawer_name)) continue;
+        const duplicate = pending.some(item =>
+          item.type === candidate.type &&
+          item.category === candidate.category &&
+          item.drawer_name === candidate.drawer_name &&
+          item.content === candidate.content &&
+          item.target_id === (candidate.target_id || null)
+        );
+        if (duplicate) continue;
+        pending.push({
+          ...candidate,
+          target_id: candidate.target_id || null,
+          created_at: new Date().toISOString(),
+          source: 'conversation'
+        });
+        added++;
+      }
+      try {
+        localStorage.setItem(EXTRACTION_PENDING_KEY, JSON.stringify(pending.slice(-100)));
+      } catch (error) {
+        console.warn('[記憶抽出] 候補をこの端末に保存できませんでした:', error);
+      }
+      return added;
+    }
+
+    // 実際のマイク会話をGLMに渡す。候補はこの端末に一時保管し、D1には書き込まない。
+    async function runMemoryExtractionTest(automatic = false) {
       const button = document.getElementById('memory-test-button');
       const output = document.getElementById('memory-test-result');
       const deviceToken = localStorage.getItem(TOKEN_KEY);
@@ -1333,15 +1392,25 @@ function speakChappyVoice(text, callback, replyShownAt) {
         output.textContent = 'まだ実際の会話がありません。先にマイクでチャッピーと会話してね。\nD1への保存：なし';
         return;
       }
-      const actualConversation = extractionConversation.join('\n');
+      const conversationStart = automatic ? lastExtractedConversationLength : 0;
+      const conversationSlice = extractionConversation.slice(conversationStart);
+      const actualConversation = conversationSlice.join('\n');
+      if (!actualConversation.trim()) return;
       if (actualConversation.length > 12000) {
-        output.textContent = '今回の会話が12,000文字を超えています。ページを開き直して、短い会話でテストしてね。\nD1への保存：なし';
+        if (!automatic) output.textContent = '今回の会話が12,000文字を超えています。ページを開き直して、短い会話でテストしてね。\nD1への保存：なし';
         return;
       }
 
-      button.disabled = true;
-      button.textContent = 'テスト中…';
-      output.textContent = '実際の会話をGLMに送っているよ。少し待ってね。';
+      if (extractionInFlight) return;
+      extractionInFlight = true;
+      // 失敗しても同じ会話を自動再送しない。次の新しい会話が来た時だけ次回対象にする。
+      lastExtractedConversationLength = extractionConversation.length;
+      if (!automatic) {
+        button.disabled = true;
+        button.textContent = '抽出中…';
+        output.style.display = 'block';
+        output.textContent = '実際の会話をGLMに送っているよ。少し待ってね。';
+      }
       try {
         const response = await fetch(API_URL + '/memory-extract-test', {
           method: 'POST',
@@ -1363,20 +1432,37 @@ function speakChappyVoice(text, callback, replyShownAt) {
             '\\n\\nD1への保存：なし';
           return;
         }
-        output.textContent =
-          '対象：このページでの実際の会話（' + extractionConversation.length + '発言・返答）\\n' +
-          'テスト結果：' + (data.modelCalled ? 'GLM呼び出し成功' : 'GLM未呼び出し') + '\\n' +
-          'モデル：' + (data.model || '不明') + '\\n' +
-          '固定ルール：' + (data.contextCounts?.fixedRules ?? '不明') + '件\\n' +
-          'チャッピープロフィール：' + (data.contextCounts?.chappyProfile ?? '不明') + '件\\n' +
-          'お母さんの既存記憶：' + (data.contextCounts?.memories ?? '不明') + '件\\n' +
-          'D1への保存：' + (data.d1WritePerformed === false ? 'なし（保存していない）' : '確認が必要') + '\\n\\n' +
-          'GLMの抽出結果：\\n' + (data.resultText || '結果テキストがありません');
+        let parsed = null;
+        try {
+          const text = String(data.resultText || '');
+          const first = text.indexOf('{');
+          const last = text.lastIndexOf('}');
+          if (first >= 0 && last > first) parsed = JSON.parse(text.slice(first, last + 1));
+        } catch (error) {}
+        const addedCandidates = savePendingMemoryCandidates(parsed?.candidates || []);
+        if (!automatic) {
+          output.textContent =
+            '対象：このページでの実際の会話（' + conversationSlice.length + '発言・返答）\\n' +
+            'テスト結果：' + (data.modelCalled ? 'GLM呼び出し成功' : 'GLM未呼び出し') + '\\n' +
+            'モデル：' + (data.model || '不明') + '\\n' +
+            '固定ルール：' + (data.contextCounts?.fixedRules ?? '不明') + '件\\n' +
+            'チャッピープロフィール：' + (data.contextCounts?.chappyProfile ?? '不明') + '件\\n' +
+            'お母さんの既存記憶：' + (data.contextCounts?.memories ?? '不明') + '件\\n' +
+            '候補として端末に保管：' + addedCandidates + '件\\n' +
+            'D1への保存：なし（保存していない）\\n\\n' +
+            'GLMの抽出結果：\\n' + (data.resultText || '結果テキストがありません');
+        } else {
+          console.log('[記憶抽出] 完了。新規候補 ' + addedCandidates + '件。D1保存なし。');
+        }
       } catch (error) {
-        output.textContent = '通信エラー：' + (error.message || error) + '\\nD1への保存：なし';
+        if (!automatic) output.textContent = '通信エラー：' + (error.message || error) + '\\nD1への保存：なし';
+        else console.warn('[記憶抽出] 失敗。自動再試行なし:', error.message || error);
       } finally {
-        button.disabled = false;
-        button.textContent = 'もう一度テストする';
+        extractionInFlight = false;
+        if (!automatic) {
+          button.disabled = false;
+          button.textContent = 'もう一度抽出する';
+        }
       }
     }
 
