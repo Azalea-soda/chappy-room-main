@@ -1463,6 +1463,10 @@ function speakChappyVoice(text, callback, replyShownAt) {
           button.disabled = false;
           button.textContent = 'もう一度抽出する';
         }
+        // 抽出中に新しい会話が追加されていた場合、その新しい分だけを後で処理する。
+        if (extractionConversation.length > lastExtractedConversationLength) {
+          scheduleMemoryExtraction();
+        }
       }
     }
 
