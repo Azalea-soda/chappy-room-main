@@ -407,14 +407,25 @@ export default {
               ],
               max_completion_tokens: 2048,
               temperature: 0.1,
+              // GLM-4.7-Flash enables reasoning by default; null explicitly disables it.
+              reasoning_effort: null,
               chat_template_kwargs: {
                 enable_thinking: false,
                 clear_thinking: true
               }
             });
-            const resultText = typeof inference?.response === "string"
-              ? inference.response.trim()
-              : "";
+            // Workers AI chat-completion responses place final text in choices[0].message.content.
+            // Keep the legacy response field as a compatibility fallback.
+            const rawContent = inference?.choices?.[0]?.message?.content ?? inference?.response;
+            const resultText = typeof rawContent === "string"
+              ? rawContent.trim()
+              : Array.isArray(rawContent)
+                ? rawContent
+                    .filter((part) => part && part.type === "text" && typeof part.text === "string")
+                    .map((part) => part.text)
+                    .join("")
+                    .trim()
+                : "";
             if (!resultText) {
               return json({
                 error: "GLMの最終回答が空でした。内部データは表示せず終了します",
