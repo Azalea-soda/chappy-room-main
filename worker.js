@@ -405,12 +405,47 @@ export default {
                 { role: "system", content: systemPrompt },
                 { role: "user", content: userPrompt }
               ],
-              max_tokens: 2048,
-              temperature: 0.1
+              max_completion_tokens: 2048,
+              temperature: 0.1,
+              chat_template_kwargs: {
+                enable_thinking: false,
+                clear_thinking: true
+              },
+              response_format: { type: "json_object" }
             });
             const resultText = typeof inference?.response === "string"
-              ? inference.response
-              : JSON.stringify(inference);
+              ? inference.response.trim()
+              : "";
+            if (!resultText) {
+              return json({
+                error: "GLMの最終回答が空でした。内部データは表示せず終了します",
+                modelCalled: true,
+                d1WritePerformed: false,
+                contextCounts: { fixedRules: fixedRules.length, chappyProfile: chappyProfile.length, memories: memories.length },
+                responseShape: inference && typeof inference === "object"
+                  ? Object.keys(inference).slice(0, 10)
+                  : typeof inference
+              }, 502);
+            }
+            let parsedResult;
+            try {
+              parsedResult = JSON.parse(resultText);
+            } catch {
+              return json({
+                error: "GLMの最終回答がJSON形式ではありません。内容は表示せず終了します",
+                modelCalled: true,
+                d1WritePerformed: false,
+                contextCounts: { fixedRules: fixedRules.length, chappyProfile: chappyProfile.length, memories: memories.length }
+              }, 502);
+            }
+            if (!parsedResult || !Array.isArray(parsedResult.candidates)) {
+              return json({
+                error: "GLMのJSONに candidates 配列がありません。内容は表示せず終了します",
+                modelCalled: true,
+                d1WritePerformed: false,
+                contextCounts: { fixedRules: fixedRules.length, chappyProfile: chappyProfile.length, memories: memories.length }
+              }, 502);
+            }
             return json({
               success: true,
               previewOnly: true,
