@@ -1337,6 +1337,10 @@ function speakChappyVoice(text, callback, replyShownAt) {
           output.textContent = 'テスト結果：エラー（HTTP ' + response.status + '）\\n' +
             (data.error || '詳細を確認できませんでした') +
             (data.detail ? '\\n詳細：' + data.detail : '') +
+            (data.diagnostics ? '\\n診断情報：' +
+              '\\n終了理由：' + (data.diagnostics.finishReason ?? '不明') +
+              '\\n生成トークン数：' + (data.diagnostics.completionTokens ?? '不明') +
+              '\\n回答文字数：' + (data.diagnostics.responseTextLength ?? '不明') : '') +
             '\\n\\nD1への保存：なし';
           return;
         }
