@@ -457,7 +457,7 @@ export default {
               } catch (error) {
                 // Keep only parser metadata. Never expose the model response or snippets.
                 const message = String(error?.message || "");
-                const positionMatch = message.match(/(?:position|at)\\s+(\\d+)/i);
+                const positionMatch = message.match(/(?:position|at)\s+(\d+)/i);
                 parseDiagnostics.push({
                   errorName: String(error?.name || "SyntaxError").slice(0, 40),
                   errorPosition: positionMatch ? Number(positionMatch[1]) : null,
