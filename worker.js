@@ -449,16 +449,25 @@ export default {
               jsonCandidates.push(resultText.slice(firstBrace, lastBrace + 1));
             }
             let parsedResult = null;
+            const parseDiagnostics = [];
             for (const candidate of jsonCandidates) {
               try {
                 parsedResult = JSON.parse(candidate);
                 break;
-              } catch {
-                // Try the next safe representation; no model output is logged or returned.
+              } catch (error) {
+                // Keep only parser metadata. Never expose the model response or snippets.
+                const message = String(error?.message || "");
+                const positionMatch = message.match(/(?:position|at)\\s+(\\d+)/i);
+                parseDiagnostics.push({
+                  errorName: String(error?.name || "SyntaxError").slice(0, 40),
+                  errorPosition: positionMatch ? Number(positionMatch[1]) : null,
+                  candidateLength: candidate.length
+                });
               }
             }
             if (!parsedResult) {
               const choice = inference?.choices?.[0] || {};
+              const trimmedText = resultText.trim();
               return json({
                 error: "GLMの最終回答をJSONとして読み取れませんでした。内容は表示せず終了します",
                 modelCalled: true,
@@ -467,7 +476,12 @@ export default {
                 diagnostics: {
                   finishReason: choice.finish_reason ?? choice.finishReason ?? null,
                   completionTokens: inference?.usage?.completion_tokens ?? null,
-                  responseTextLength: resultText.length
+                  responseTextLength: resultText.length,
+                  firstCharacter: trimmedText.slice(0, 1) || null,
+                  lastCharacter: trimmedText.slice(-1) || null,
+                  containsMarkdownFence: resultText.includes("```"),
+                  jsonCandidateCount: jsonCandidates.length,
+                  parseAttempts: parseDiagnostics
                 }
               }, 502);
             }
