@@ -437,15 +437,38 @@ export default {
                   : typeof inference
               }, 502);
             }
-            let parsedResult;
-            try {
-              parsedResult = JSON.parse(resultText);
-            } catch {
+            // Accept a plain JSON response, a fenced JSON block, or a JSON object
+            // surrounded by short explanatory text. Never return model text in errors.
+            const jsonCandidates = [
+              resultText,
+              resultText.replace(/^\s*```(?:json)?\s*/i, "").replace(/\s*```\s*$/, "").trim()
+            ];
+            const firstBrace = resultText.indexOf("{");
+            const lastBrace = resultText.lastIndexOf("}");
+            if (firstBrace >= 0 && lastBrace > firstBrace) {
+              jsonCandidates.push(resultText.slice(firstBrace, lastBrace + 1));
+            }
+            let parsedResult = null;
+            for (const candidate of jsonCandidates) {
+              try {
+                parsedResult = JSON.parse(candidate);
+                break;
+              } catch {
+                // Try the next safe representation; no model output is logged or returned.
+              }
+            }
+            if (!parsedResult) {
+              const choice = inference?.choices?.[0] || {};
               return json({
-                error: "GLMの最終回答がJSON形式ではありません。内容は表示せず終了します",
+                error: "GLMの最終回答をJSONとして読み取れませんでした。内容は表示せず終了します",
                 modelCalled: true,
                 d1WritePerformed: false,
-                contextCounts: { fixedRules: fixedRules.length, chappyProfile: chappyProfile.length, memories: memories.length }
+                contextCounts: { fixedRules: fixedRules.length, chappyProfile: chappyProfile.length, memories: memories.length },
+                diagnostics: {
+                  finishReason: choice.finish_reason ?? choice.finishReason ?? null,
+                  completionTokens: inference?.usage?.completion_tokens ?? null,
+                  responseTextLength: resultText.length
+                }
               }, 502);
             }
             if (!parsedResult || !Array.isArray(parsedResult.candidates)) {
