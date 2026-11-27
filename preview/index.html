@@ -271,7 +271,7 @@
       </button>
 
       <div id="memory-test-panel">
-        <div><strong>開発テスト：</strong>GLM記憶抽出（練習用の文章・保存なし）</div>
+        <div><strong>開発テスト：</strong>実際のマイク会話からGLM記憶抽出（D1保存なし）</div>
         <button id="memory-test-button" type="button" onclick="runMemoryExtractionTest()">記憶抽出テストを実行</button>
         <pre id="memory-test-result" aria-live="polite"></pre>
       </div>
@@ -295,6 +295,8 @@
     let currentState = 'idle';
     let recognition = null;
     let sessionUserTexts = [];
+    // このページを開いている間だけ、実際の会話を記憶抽出テスト用に保持する（保存しない）。
+    let extractionConversation = [];
     let recognitionError = null;
     let finishTimer = null;
     let responseStarted = false;
@@ -562,6 +564,8 @@
         return;
       }
 
+      // マイクで認識した本人の発言を、ページ内だけの抽出テスト用会話に追加する。
+      extractionConversation.push('お母さん: ' + fullTalk);
       getChappyResponse(fullTalk);
     }
 
@@ -991,6 +995,8 @@
         if (!voiceResult.ok) throw voiceResult.error;
 
         if (requestGeneration !== responseGeneration) return;
+        // チャッピーの返答も会話の文脈として保持する。記憶候補の事実にはしないよう抽出側で指示済み。
+        extractionConversation.push('チャッピー: ' + accumulatedText.trim());
         currentState = 'idle';
         setButtonState('idle');
 
@@ -1307,7 +1313,7 @@ function speakChappyVoice(text, callback, replyShownAt) {
       });
     }
 
-    // GLM記憶抽出の手動テスト。固定の練習文のみを送り、D1への保存は行わない。
+    // 実際のマイク会話をGLMに渡す手動テスト。会話はページ内だけに保持し、D1には保存しない。
     async function runMemoryExtractionTest() {
       const button = document.getElementById('memory-test-button');
       const output = document.getElementById('memory-test-result');
@@ -1319,10 +1325,23 @@ function speakChappyVoice(text, callback, replyShownAt) {
         return;
       }
 
+      if (currentState !== 'idle') {
+        output.textContent = '会話が終わってからテストしてね。マイクの利用中やチャッピーの返事中は実行できないよ。';
+        return;
+      }
+      if (extractionConversation.length === 0) {
+        output.textContent = 'まだ実際の会話がありません。先にマイクでチャッピーと会話してね。\nD1への保存：なし';
+        return;
+      }
+      const actualConversation = extractionConversation.join('\n');
+      if (actualConversation.length > 12000) {
+        output.textContent = '今回の会話が12,000文字を超えています。ページを開き直して、短い会話でテストしてね。\nD1への保存：なし';
+        return;
+      }
+
       button.disabled = true;
       button.textContent = 'テスト中…';
-      output.textContent = '練習用の文章をGLMに送っているよ。少し待ってね。';
-      const sampleConversation = '（テスト用の架空の会話）今日は初めて近所の公園まで散歩したよ。桜が咲いていて、とても嬉しかった。また行きたいな。';
+      output.textContent = '実際の会話をGLMに送っているよ。少し待ってね。';
       try {
         const response = await fetch(API_URL + '/memory-extract-test', {
           method: 'POST',
@@ -1330,7 +1349,7 @@ function speakChappyVoice(text, callback, replyShownAt) {
             'Content-Type': 'application/json; charset=utf-8',
             'Authorization': 'Bearer ' + deviceToken
           },
-          body: JSON.stringify({ conversation: sampleConversation })
+          body: JSON.stringify({ conversation: actualConversation })
         });
         const data = await response.json();
         if (!response.ok) {
@@ -1345,6 +1364,7 @@ function speakChappyVoice(text, callback, replyShownAt) {
           return;
         }
         output.textContent =
+          '対象：このページでの実際の会話（' + extractionConversation.length + '発言・返答）\\n' +
           'テスト結果：' + (data.modelCalled ? 'GLM呼び出し成功' : 'GLM未呼び出し') + '\\n' +
           'モデル：' + (data.model || '不明') + '\\n' +
           '固定ルール：' + (data.contextCounts?.fixedRules ?? '不明') + '件\\n' +
