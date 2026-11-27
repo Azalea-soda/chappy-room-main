@@ -410,8 +410,7 @@ export default {
               chat_template_kwargs: {
                 enable_thinking: false,
                 clear_thinking: true
-              },
-              response_format: { type: "json_object" }
+              }
             });
             const resultText = typeof inference?.response === "string"
               ? inference.response.trim()
